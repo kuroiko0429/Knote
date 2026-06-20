@@ -1,19 +1,90 @@
 <script lang="ts">
-  import { RenderMarkdown } from '../wailsjs/go/main/App.js'
+  import { onMount } from 'svelte'
+  import {
+    RenderMarkdown,
+    ListNotes,
+    ReadNote,
+    SaveNote,
+    CreateNote,
+    DeleteNote,
+  } from '../wailsjs/go/main/App.js'
 
-  let source: string = '# Knote\n\nここにMarkdownを書く'
-  let html: string = ''
+  let notes: string[] = []
+  let currentNote: string | null = null
+  let source = ''
+  let html = ''
+  let newNoteName = ''
+  let saveTimer: ReturnType<typeof setTimeout>
 
-  async function update(): Promise<void> {
+  async function refreshList(): Promise<void> {
+    notes = await ListNotes()
+  }
+
+  async function selectNote(name: string): Promise<void> {
+    currentNote = name
+    source = await ReadNote(name)
+    await render()
+  }
+
+  async function render(): Promise<void> {
     html = await RenderMarkdown(source)
   }
 
-  update()
+  function onEdit(): void {
+    render()
+    if (!currentNote) return
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => SaveNote(currentNote!, source), 400)
+  }
+
+  async function newNote(): Promise<void> {
+    const name = newNoteName.trim()
+    if (!name) return
+    await CreateNote(name)
+    newNoteName = ''
+    await refreshList()
+    await selectNote(name)
+  }
+
+  async function deleteNote(name: string): Promise<void> {
+    await DeleteNote(name)
+    if (currentNote === name) {
+      currentNote = null
+      source = ''
+      html = ''
+    }
+    await refreshList()
+  }
+
+  onMount(refreshList)
 </script>
 
 <main>
-  <textarea bind:value={source} on:input={update} class="editor"></textarea>
-  <div class="preview">{@html html}</div>
+  <nav class="sidebar">
+    <div class="new-note">
+      <input
+        bind:value={newNoteName}
+        on:keydown={(e) => e.key === 'Enter' && newNote()}
+        placeholder="new note name"
+      />
+      <button on:click={newNote}>+</button>
+    </div>
+    <ul>
+      {#each notes as name}
+        <li class:active={name === currentNote}>
+          <span class="note-name" on:click={() => selectNote(name)}>{name}</span>
+          <button class="delete" on:click={() => deleteNote(name)}>×</button>
+        </li>
+      {/each}
+    </ul>
+  </nav>
+
+  {#if currentNote}
+    <textarea bind:value={source} on:input={onEdit} class="editor"></textarea>
+    <div class="preview">{@html html}</div>
+  {:else}
+    <div class="empty">ノートを選ぶか、新規作成して</div>
+  {/if}
 </main>
 
 <style>
@@ -23,8 +94,62 @@
 
   main {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 200px 1fr 1fr;
     height: 100vh;
+  }
+
+  .sidebar {
+    border-right: 1px solid #ccc;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .new-note {
+    display: flex;
+    padding: 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .new-note input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+  }
+
+  li.active {
+    background: rgba(128, 128, 128, 0.2);
+  }
+
+  .note-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .delete {
+    border: none;
+    background: none;
+    cursor: pointer;
+    opacity: 0.5;
+  }
+
+  .delete:hover {
+    opacity: 1;
   }
 
   .editor {
@@ -40,5 +165,13 @@
     padding: 1rem;
     overflow-y: auto;
     border-left: 1px solid #ccc;
+  }
+
+  .empty {
+    grid-column: 2 / 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.5;
   }
 </style>
