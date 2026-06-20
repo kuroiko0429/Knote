@@ -56,6 +56,20 @@
     await refreshList()
   }
 
+  async function onPreviewClick(e: MouseEvent): Promise<void> {
+    const target = (e.target as HTMLElement).closest('a')
+    if (!target) return
+    const href = target.getAttribute('href') ?? ''
+    if (!href.startsWith('knote:')) return
+    e.preventDefault()
+    const name = href.slice('knote:'.length)
+    if (!notes.includes(name)) {
+      await CreateNote(name)
+      await refreshList()
+    }
+    await selectNote(name)
+  }
+
   onMount(refreshList)
 </script>
 
@@ -81,7 +95,7 @@
 
   {#if currentNote}
     <textarea bind:value={source} on:input={onEdit} class="editor"></textarea>
-    <div class="preview">{@html html}</div>
+    <div class="preview" on:click={onPreviewClick}>{@html html}</div>
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
@@ -165,6 +179,16 @@
     padding: 1rem;
     overflow-y: auto;
     border-left: 1px solid #ccc;
+  }
+
+  .preview :global(a[href^='knote:']) {
+    color: #7c9eff;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .preview :global(a[href^='knote:']:hover) {
+    text-decoration: underline;
   }
 
   .empty {

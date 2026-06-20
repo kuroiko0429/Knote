@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -18,6 +19,8 @@ type App struct {
 	md        goldmark.Markdown
 	vaultPath string
 }
+
+var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
 
 // NewApp creates a new App application struct
 func NewApp() *App {
@@ -37,8 +40,11 @@ func (a *App) startup(ctx context.Context) {
 	os.MkdirAll(a.vaultPath, 0755)
 }
 
-// RenderMarkdown converts markdown source to HTML
+// RenderMarkdown converts markdown source to HTML. [[note]] wikilinks are
+// rewritten into knote:// links so the frontend can intercept clicks on them.
 func (a *App) RenderMarkdown(src string) string {
+	src = wikilinkPattern.ReplaceAllString(src, "[$1](<knote:$1>)")
+
 	var buf bytes.Buffer
 	if err := a.md.Convert([]byte(src), &buf); err != nil {
 		return ""
