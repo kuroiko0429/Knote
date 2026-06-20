@@ -8,9 +8,11 @@
     CreateNote,
     DeleteNote,
     RenameNote,
+    SearchNotes,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
+  let visibleNotes: string[] = []
   let currentNote: string | null = null
   let source = ''
   let html = ''
@@ -18,6 +20,8 @@
   let saveTimer: ReturnType<typeof setTimeout>
   let renamingNote: string | null = null
   let renameValue = ''
+  let searchQuery = ''
+  let searchTimer: ReturnType<typeof setTimeout>
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -26,6 +30,16 @@
 
   async function refreshList(): Promise<void> {
     notes = await ListNotes()
+    await runSearch()
+  }
+
+  async function runSearch(): Promise<void> {
+    visibleNotes = searchQuery.trim() ? await SearchNotes(searchQuery) : notes
+  }
+
+  function onSearchInput(): void {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(runSearch, 200)
   }
 
   async function selectNote(name: string): Promise<void> {
@@ -110,8 +124,14 @@
       />
       <button on:click={newNote}>+</button>
     </div>
+    <input
+      class="search"
+      bind:value={searchQuery}
+      on:input={onSearchInput}
+      placeholder="search"
+    />
     <ul>
-      {#each notes as name}
+      {#each visibleNotes as name}
         <li class:active={name === currentNote}>
           {#if renamingNote === name}
             <input
@@ -172,6 +192,10 @@
   .new-note input {
     flex: 1;
     min-width: 0;
+  }
+
+  .search {
+    margin: 0 0.5rem 0.5rem;
   }
 
   ul {

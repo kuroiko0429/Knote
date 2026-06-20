@@ -74,6 +74,40 @@ func (a *App) ListNotes() ([]string, error) {
 	return names, nil
 }
 
+// SearchNotes returns the names of notes whose title or content contains query
+func (a *App) SearchNotes(query string) ([]string, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return a.ListNotes()
+	}
+
+	entries, err := os.ReadDir(a.vaultPath)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".md")
+		if strings.Contains(strings.ToLower(name), q) {
+			names = append(names, name)
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, e.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(strings.ToLower(string(data)), q) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 // ReadNote returns the content of the given note
 func (a *App) ReadNote(name string) (string, error) {
 	data, err := os.ReadFile(a.notePath(name))
