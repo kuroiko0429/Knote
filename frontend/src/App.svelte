@@ -1,5 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { EditorView, basicSetup } from 'codemirror'
+  import { EditorState } from '@codemirror/state'
+  import { markdown } from '@codemirror/lang-markdown'
+  import { oneDark } from '@codemirror/theme-one-dark'
   import {
     RenderMarkdown,
     ListNotes,
@@ -46,8 +50,8 @@
   }
 
   async function selectNote(name: string): Promise<void> {
-    currentNote = name
     source = await ReadNote(name)
+    currentNote = name
     await render()
   }
 
@@ -60,6 +64,31 @@
     if (!currentNote) return
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => SaveNote(currentNote!, source), 400)
+  }
+
+  function initEditor(el: HTMLDivElement): { destroy(): void } {
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: source,
+        extensions: [
+          basicSetup,
+          markdown(),
+          oneDark,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              source = update.state.doc.toString()
+              onEdit()
+            }
+          }),
+        ],
+      }),
+      parent: el,
+    })
+    return {
+      destroy() {
+        view.destroy()
+      },
+    }
   }
 
   async function newNote(): Promise<void> {
@@ -181,7 +210,9 @@
   </nav>
 
   {#if currentNote}
-    <textarea bind:value={source} on:input={onEdit} class="editor"></textarea>
+    {#key currentNote}
+      <div class="editor" use:initEditor></div>
+    {/key}
     <div class="preview" on:click={onPreviewClick}>{@html html}</div>
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
@@ -282,10 +313,15 @@
   }
 
   .editor {
-    border: none;
-    outline: none;
-    resize: none;
-    padding: 1rem;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .editor :global(.cm-editor) {
+    height: 100%;
+  }
+
+  .editor :global(.cm-scroller) {
     font-family: monospace;
     font-size: 1rem;
   }
