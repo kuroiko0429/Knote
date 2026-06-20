@@ -9,6 +9,8 @@
     DeleteNote,
     RenameNote,
     SearchNotes,
+    GetVaultPath,
+    SelectVault,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -22,6 +24,7 @@
   let renameValue = ''
   let searchQuery = ''
   let searchTimer: ReturnType<typeof setTimeout>
+  let vaultPath = ''
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -111,7 +114,19 @@
     await selectNote(name)
   }
 
-  onMount(refreshList)
+  async function changeVault(): Promise<void> {
+    vaultPath = await SelectVault()
+    currentNote = null
+    source = ''
+    html = ''
+    searchQuery = ''
+    await refreshList()
+  }
+
+  onMount(async () => {
+    vaultPath = await GetVaultPath()
+    await refreshList()
+  })
 </script>
 
 <main>
@@ -155,6 +170,10 @@
         </li>
       {/each}
     </ul>
+    <div class="vault" title={vaultPath}>
+      <span class="vault-path">{vaultPath}</span>
+      <button on:click={changeVault}>変更</button>
+    </div>
   </nav>
 
   {#if currentNote}
@@ -178,9 +197,9 @@
 
   .sidebar {
     border-right: 1px solid #ccc;
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
+    min-height: 0;
   }
 
   .new-note {
@@ -202,6 +221,25 @@
     list-style: none;
     margin: 0;
     padding: 0;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .vault {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.4rem 0.6rem;
+    border-top: 1px solid #ccc;
+    font-size: 0.75rem;
+  }
+
+  .vault-path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.7;
   }
 
   li {

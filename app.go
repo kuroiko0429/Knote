@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/yuin/goldmark"
 )
 
@@ -18,6 +20,10 @@ type App struct {
 	ctx       context.Context
 	md        goldmark.Markdown
 	vaultPath string
+}
+
+type appConfig struct {
+	VaultPath string `json:"vaultPath"`
 }
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
@@ -32,12 +38,83 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
+	if saved := a.loadConfig().VaultPath; saved != "" {
+		a.vaultPath = saved
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		a.vaultPath = filepath.Join(home, "Knote")
 	}
-	a.vaultPath = filepath.Join(home, "Knote")
 	os.MkdirAll(a.vaultPath, 0755)
+}
+
+func (a *App) configPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "knote", "config.json"), nil
+}
+
+func (a *App) loadConfig() appConfig {
+	var c appConfig
+	path, err := a.configPath()
+	if err != nil {
+		return c
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return c
+	}
+	json.Unmarshal(data, &c)
+	return c
+}
+
+func (a *App) saveConfig() error {
+	path, err := a.configPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(appConfig{VaultPath: a.vaultPath})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// GetVaultPath returns the currently active vault directory
+func (a *App) GetVaultPath() string {
+	return a.vaultPath
+}
+
+// SelectVault opens a folder picker and switches the vault to the chosen
+// directory. Returns the active vault path (unchanged if the dialog was
+// cancelled).
+func (a *App) SelectVault() (string, error) {
+	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "Knoteの保存先フォルダを選択",
+		DefaultDirectory: a.vaultPath,
+	})
+	if err != nil {
+		return "", err
+	}
+	if dir == "" {
+		return a.vaultPath, nil
+	}
+
+	a.vaultPath = dir
+	if err := os.MkdirAll(a.vaultPath, 0755); err != nil {
+		return "", err
+	}
+	if err := a.saveConfig(); err != nil {
+		return "", err
+	}
+	return a.vaultPath, nil
 }
 
 // RenderMarkdown converts markdown source to HTML. [[note]] wikilinks are
