@@ -4,9 +4,14 @@
   import { EditorState } from '@codemirror/state'
   import { markdown } from '@codemirror/lang-markdown'
   import { oneDark } from '@codemirror/theme-one-dark'
+  import TreeItem from './TreeItem.svelte'
+  import type { TreeNode } from './TreeItem.svelte'
   import {
     RenderMarkdown,
     ListNotes,
+    ListFolders,
+    CreateFolder,
+    RenameFolder,
     ReadNote,
     SaveNote,
     CreateNote,
@@ -19,6 +24,7 @@
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
+  let folders: string[] = []
   let visibleNotes: string[] = []
   let currentNote: string | null = null
   let source = ''
@@ -26,8 +32,10 @@
   let backlinks: string[] = []
   let newNoteName = ''
   let saveTimer: ReturnType<typeof setTimeout>
-  let renamingNote: string | null = null
+  let renamingPath: string | null = null
+  let renamingType: 'note' | 'folder' | null = null
   let renameValue = ''
+  let expanded = new Set<string>()
   let searchQuery = ''
   let searchTimer: ReturnType<typeof setTimeout>
   let vaultPath = ''
@@ -35,7 +43,58 @@
   let searchInputEl: HTMLInputElement
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
-  let contextMenu: { x: number; y: number; type: 'empty' | 'note'; note?: string } | null = null
+  let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
+
+  function basename(path: string): string {
+    const i = path.lastIndexOf('/')
+    return i === -1 ? path : path.slice(i + 1)
+  }
+
+  function dirname(path: string): string {
+    const i = path.lastIndexOf('/')
+    return i === -1 ? '' : path.slice(0, i)
+  }
+
+  function buildTree(folderPaths: string[], notePaths: string[]): TreeNode[] {
+    const folderMap = new Map<string, TreeNode & { type: 'folder' }>()
+    const rootChildren: TreeNode[] = []
+
+    function getOrCreateFolder(path: string): TreeNode & { type: 'folder' } {
+      let node = folderMap.get(path)
+      if (node) return node
+      node = { type: 'folder', name: basename(path), path, children: [] }
+      folderMap.set(path, node)
+      const parent = dirname(path)
+      if (parent) getOrCreateFolder(parent).children.push(node)
+      else rootChildren.push(node)
+      return node
+    }
+
+    for (const f of [...folderPaths].sort((a, b) => a.split('/').length - b.split('/').length)) {
+      getOrCreateFolder(f)
+    }
+
+    for (const n of notePaths) {
+      const node: TreeNode = { type: 'note', name: basename(n), path: n }
+      const parent = dirname(n)
+      if (parent) getOrCreateFolder(parent).children.push(node)
+      else rootChildren.push(node)
+    }
+
+    function sortChildren(nodes: TreeNode[]): void {
+      nodes.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+      for (const n of nodes) if (n.type === 'folder') sortChildren(n.children)
+    }
+    sortChildren(rootChildren)
+
+    return rootChildren
+  }
+
+  $: tree = buildTree(folders, notes)
+  $: isSearching = searchQuery.trim().length > 0
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -44,6 +103,7 @@
 
   async function refreshList(): Promise<void> {
     notes = await ListNotes()
+    folders = await ListFolders()
     await runSearch()
   }
 
@@ -140,10 +200,23 @@
     contextMenu = { x: e.clientX, y: e.clientY, type: 'empty' }
   }
 
-  function onNoteContextMenu(e: MouseEvent, name: string): void {
+  function onNoteContextMenu(e: MouseEvent, path: string): void {
     e.preventDefault()
     e.stopPropagation()
-    contextMenu = { x: e.clientX, y: e.clientY, type: 'note', note: name }
+    contextMenu = { x: e.clientX, y: e.clientY, type: 'note', path }
+  }
+
+  function onFolderContextMenu(e: MouseEvent, path: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    contextMenu = { x: e.clientX, y: e.clientY, type: 'folder', path }
+  }
+
+  function onToggle(path: string): void {
+    const next = new Set(expanded)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    expanded = next
   }
 
   async function createNoteViaMenu(): Promise<void> {
@@ -160,6 +233,19 @@
     startRename(name)
   }
 
+  async function createFolderViaMenu(): Promise<void> {
+    closeContextMenu()
+    let name = '新規フォルダ'
+    let i = 1
+    while (folders.includes(name)) {
+      name = `新規フォルダ${i}`
+      i++
+    }
+    await CreateFolder(name)
+    await refreshList()
+    startRenameFolder(name)
+  }
+
   async function deleteNote(name: string): Promise<void> {
     await DeleteNote(name)
     if (currentNote === name) {
@@ -171,22 +257,47 @@
     await refreshList()
   }
 
-  function startRename(name: string): void {
-    renamingNote = name
-    renameValue = name
+  function startRename(path: string): void {
+    renamingPath = path
+    renamingType = 'note'
+    renameValue = basename(path)
+  }
+
+  function startRenameFolder(path: string): void {
+    renamingPath = path
+    renamingType = 'folder'
+    renameValue = basename(path)
   }
 
   function cancelRename(): void {
-    renamingNote = null
+    renamingPath = null
+    renamingType = null
   }
 
   async function confirmRename(): Promise<void> {
-    const oldName = renamingNote
-    const newName = renameValue.trim()
-    renamingNote = null
-    if (!oldName || !newName || newName === oldName) return
-    await RenameNote(oldName, newName)
-    if (currentNote === oldName) currentNote = newName
+    const oldPath = renamingPath
+    const type = renamingType
+    const newBase = renameValue.trim()
+    renamingPath = null
+    renamingType = null
+    if (!oldPath || !newBase) return
+    const dir = dirname(oldPath)
+    const newPath = dir ? `${dir}/${newBase}` : newBase
+    if (newPath === oldPath) return
+
+    if (type === 'folder') {
+      await RenameFolder(oldPath, newPath)
+      if (expanded.has(oldPath)) {
+        const next = new Set(expanded)
+        next.delete(oldPath)
+        next.add(newPath)
+        expanded = next
+      }
+    } else {
+      await RenameNote(oldPath, newPath)
+      if (currentNote === oldPath) currentNote = newPath
+    }
+
     await refreshList()
     if (currentNote) {
       source = await ReadNote(currentNote)
@@ -246,29 +357,53 @@
       placeholder="search"
     />
     <ul on:contextmenu={onSidebarContextMenu}>
-      {#each visibleNotes as name}
-        <li class:active={name === currentNote} on:contextmenu={(e) => onNoteContextMenu(e, name)}>
-          {#if renamingNote === name}
-            <input
-              class="rename-input"
-              use:focusInput
-              bind:value={renameValue}
-              on:keydown={(e) => {
-                if (e.key === 'Enter') confirmRename()
-                if (e.key === 'Escape') cancelRename()
-              }}
-              on:blur={confirmRename}
-            />
-          {:else}
-            <span
-              class="note-name"
-              on:click={() => selectNote(name)}
-              on:dblclick={() => startRename(name)}
-            >{name}</span>
-          {/if}
-          <button class="delete" on:click={() => deleteNote(name)}>×</button>
-        </li>
-      {/each}
+      {#if isSearching}
+        {#each visibleNotes as path}
+          <li class:active={path === currentNote} on:contextmenu={(e) => onNoteContextMenu(e, path)}>
+            {#if renamingPath === path && renamingType === 'note'}
+              <input
+                class="rename-input"
+                use:focusInput
+                bind:value={renameValue}
+                on:keydown={(e) => {
+                  if (e.key === 'Enter') confirmRename()
+                  if (e.key === 'Escape') cancelRename()
+                }}
+                on:blur={confirmRename}
+              />
+            {:else}
+              <span
+                class="note-name"
+                on:click={() => selectNote(path)}
+                on:dblclick={() => startRename(path)}
+              >{path}</span>
+            {/if}
+            <button class="delete" on:click={() => deleteNote(path)}>×</button>
+          </li>
+        {/each}
+      {:else}
+        {#each tree as node (node.path)}
+          <TreeItem
+            {node}
+            depth={0}
+            {currentNote}
+            {renamingPath}
+            {renamingType}
+            bind:renameValue
+            {expanded}
+            onSelect={selectNote}
+            {onToggle}
+            onRenameStartNote={startRename}
+            onRenameStartFolder={startRenameFolder}
+            onConfirmRename={confirmRename}
+            onCancelRename={cancelRename}
+            onNoteContext={onNoteContextMenu}
+            onFolderContext={onFolderContextMenu}
+            onDeleteNote={deleteNote}
+            focusInputAction={focusInput}
+          />
+        {/each}
+      {/if}
     </ul>
     <div class="vault" title={vaultPath}>
       <span class="vault-path">{vaultPath}</span>
@@ -305,10 +440,14 @@
     <div class="context-menu" style="left:{contextMenu.x}px; top:{contextMenu.y}px">
       {#if contextMenu.type === 'empty'}
         <button on:click={createNoteViaMenu}>新規ノート</button>
-      {:else if contextMenu.type === 'note' && contextMenu.note}
-        {@const noteName = contextMenu.note}
-        <button on:click={() => { closeContextMenu(); startRename(noteName) }}>名前を変更</button>
-        <button on:click={() => { closeContextMenu(); deleteNote(noteName) }}>削除</button>
+        <button on:click={createFolderViaMenu}>新規フォルダ</button>
+      {:else if contextMenu.type === 'note' && contextMenu.path}
+        {@const path = contextMenu.path}
+        <button on:click={() => { closeContextMenu(); startRename(path) }}>名前を変更</button>
+        <button on:click={() => { closeContextMenu(); deleteNote(path) }}>削除</button>
+      {:else if contextMenu.type === 'folder' && contextMenu.path}
+        {@const path = contextMenu.path}
+        <button on:click={() => { closeContextMenu(); startRenameFolder(path) }}>名前を変更</button>
       {/if}
     </div>
   {/if}

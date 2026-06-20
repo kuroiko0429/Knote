@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -133,82 +134,131 @@ func (a *App) notePath(name string) string {
 	return filepath.Join(a.vaultPath, name+".md")
 }
 
-// ListNotes returns the names of all notes in the vault, sorted alphabetically
-func (a *App) ListNotes() ([]string, error) {
-	entries, err := os.ReadDir(a.vaultPath)
-	if err != nil {
-		return nil, err
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+// walkNotes calls fn for every .md file in the vault, recursing into
+// subfolders. relPath is the note's identity: its path relative to the
+// vault root, "/"-separated, without the .md extension.
+func (a *App) walkNotes(fn func(relPath string) error) error {
+	return filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		names = append(names, strings.TrimSuffix(e.Name(), ".md"))
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		rel, err := filepath.Rel(a.vaultPath, path)
+		if err != nil {
+			return err
+		}
+		return fn(filepath.ToSlash(strings.TrimSuffix(rel, ".md")))
+	})
+}
+
+// ListNotes returns the paths of all notes in the vault, sorted alphabetically
+func (a *App) ListNotes() ([]string, error) {
+	names := []string{}
+	if err := a.walkNotes(func(relPath string) error {
+		names = append(names, relPath)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	sort.Strings(names)
 	return names, nil
 }
 
-// SearchNotes returns the names of notes whose title or content contains query
+// ListFolders returns the paths of all folders in the vault, sorted alphabetically
+func (a *App) ListFolders() ([]string, error) {
+	folders := []string{}
+	err := filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == a.vaultPath || !d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(a.vaultPath, path)
+		if err != nil {
+			return err
+		}
+		folders = append(folders, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(folders)
+	return folders, nil
+}
+
+// CreateFolder creates a new folder. Returns an error if it already exists
+func (a *App) CreateFolder(relPath string) error {
+	path := filepath.Join(a.vaultPath, relPath)
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("folder %q already exists", relPath)
+	}
+	return os.MkdirAll(path, 0755)
+}
+
+// RenameFolder renames a folder. Returns an error if the new path is already taken
+func (a *App) RenameFolder(oldRelPath string, newRelPath string) error {
+	newPath := filepath.Join(a.vaultPath, newRelPath)
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("folder %q already exists", newRelPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return err
+	}
+	return os.Rename(filepath.Join(a.vaultPath, oldRelPath), newPath)
+}
+
+// SearchNotes returns the paths of notes whose path or content contains query
 func (a *App) SearchNotes(query string) ([]string, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return a.ListNotes()
 	}
 
-	entries, err := os.ReadDir(a.vaultPath)
-	if err != nil {
-		return nil, err
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	names := []string{}
+	err := a.walkNotes(func(relPath string) error {
+		if strings.Contains(strings.ToLower(relPath), q) {
+			names = append(names, relPath)
+			return nil
 		}
-		name := strings.TrimSuffix(e.Name(), ".md")
-		if strings.Contains(strings.ToLower(name), q) {
-			names = append(names, name)
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(a.vaultPath, e.Name()))
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
 		if err != nil {
-			continue
+			return nil
 		}
 		if strings.Contains(strings.ToLower(string(data)), q) {
-			names = append(names, name)
+			names = append(names, relPath)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(names)
 	return names, nil
 }
 
-// GetBacklinks returns the names of notes that contain a [[wikilink]] to the given note
+// GetBacklinks returns the paths of notes that contain a [[wikilink]] to the given note
 func (a *App) GetBacklinks(name string) ([]string, error) {
-	entries, err := os.ReadDir(a.vaultPath)
-	if err != nil {
-		return nil, err
-	}
-
 	pattern := regexp.MustCompile(`\[\[` + regexp.QuoteMeta(name) + `\]\]`)
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	names := []string{}
+	err := a.walkNotes(func(relPath string) error {
+		if relPath == name {
+			return nil
 		}
-		noteName := strings.TrimSuffix(e.Name(), ".md")
-		if noteName == name {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(a.vaultPath, e.Name()))
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
 		if err != nil {
-			continue
+			return nil
 		}
 		if pattern.Match(data) {
-			names = append(names, noteName)
+			names = append(names, relPath)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(names)
 	return names, nil
@@ -234,6 +284,9 @@ func (a *App) CreateNote(name string) error {
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("note %q already exists", name)
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	return os.WriteFile(path, []byte(""), 0644)
 }
 
@@ -249,6 +302,9 @@ func (a *App) RenameNote(oldName string, newName string) error {
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("note %q already exists", newName)
 	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return err
+	}
 	if err := os.Rename(a.notePath(oldName), newPath); err != nil {
 		return err
 	}
@@ -257,29 +313,18 @@ func (a *App) RenameNote(oldName string, newName string) error {
 
 // updateWikilinks rewrites every [[oldName]] occurrence across the vault to [[newName]]
 func (a *App) updateWikilinks(oldName string, newName string) error {
-	entries, err := os.ReadDir(a.vaultPath)
-	if err != nil {
-		return err
-	}
-
 	pattern := regexp.MustCompile(`\[\[` + regexp.QuoteMeta(oldName) + `\]\]`)
 	replacement := "[[" + newName + "]]"
 
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(a.vaultPath, e.Name())
+	return a.walkNotes(func(relPath string) error {
+		path := filepath.Join(a.vaultPath, relPath+".md")
 		data, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			return nil
 		}
 		if !pattern.Match(data) {
-			continue
+			return nil
 		}
-		if err := os.WriteFile(path, pattern.ReplaceAll(data, []byte(replacement)), 0644); err != nil {
-			return err
-		}
-	}
-	return nil
+		return os.WriteFile(path, pattern.ReplaceAll(data, []byte(replacement)), 0644)
+	})
 }
