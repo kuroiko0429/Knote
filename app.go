@@ -213,11 +213,44 @@ func (a *App) DeleteNote(name string) error {
 	return os.Remove(a.notePath(name))
 }
 
-// RenameNote renames a note. Returns an error if the new name is already taken
+// RenameNote renames a note and rewrites any [[wikilinks]] to it in other
+// notes. Returns an error if the new name is already taken
 func (a *App) RenameNote(oldName string, newName string) error {
 	newPath := a.notePath(newName)
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("note %q already exists", newName)
 	}
-	return os.Rename(a.notePath(oldName), newPath)
+	if err := os.Rename(a.notePath(oldName), newPath); err != nil {
+		return err
+	}
+	return a.updateWikilinks(oldName, newName)
+}
+
+// updateWikilinks rewrites every [[oldName]] occurrence across the vault to [[newName]]
+func (a *App) updateWikilinks(oldName string, newName string) error {
+	entries, err := os.ReadDir(a.vaultPath)
+	if err != nil {
+		return err
+	}
+
+	pattern := regexp.MustCompile(`\[\[` + regexp.QuoteMeta(oldName) + `\]\]`)
+	replacement := "[[" + newName + "]]"
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(a.vaultPath, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if !pattern.Match(data) {
+			continue
+		}
+		if err := os.WriteFile(path, pattern.ReplaceAll(data, []byte(replacement)), 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }

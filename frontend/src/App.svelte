@@ -98,6 +98,10 @@
     await RenameNote(oldName, newName)
     if (currentNote === oldName) currentNote = newName
     await refreshList()
+    if (currentNote) {
+      source = await ReadNote(currentNote)
+      await render()
+    }
   }
 
   async function onPreviewClick(e: MouseEvent): Promise<void> {
