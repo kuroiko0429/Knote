@@ -35,6 +35,7 @@
   let searchInputEl: HTMLInputElement
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
+  let contextMenu: { x: number; y: number; type: 'empty' | 'note'; note?: string } | null = null
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -130,6 +131,35 @@
     await selectNote(name)
   }
 
+  function closeContextMenu(): void {
+    contextMenu = null
+  }
+
+  function onSidebarContextMenu(e: MouseEvent): void {
+    e.preventDefault()
+    contextMenu = { x: e.clientX, y: e.clientY, type: 'empty' }
+  }
+
+  function onNoteContextMenu(e: MouseEvent, name: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    contextMenu = { x: e.clientX, y: e.clientY, type: 'note', note: name }
+  }
+
+  async function createNoteViaMenu(): Promise<void> {
+    closeContextMenu()
+    let name = '無題'
+    let i = 1
+    while (notes.includes(name)) {
+      name = `無題${i}`
+      i++
+    }
+    await CreateNote(name)
+    await refreshList()
+    await selectNote(name)
+    startRename(name)
+  }
+
   async function deleteNote(name: string): Promise<void> {
     await DeleteNote(name)
     if (currentNote === name) {
@@ -195,7 +225,7 @@
   })
 </script>
 
-<svelte:window on:keydown={onGlobalKeydown} />
+<svelte:window on:keydown={onGlobalKeydown} on:click={closeContextMenu} />
 
 <main>
   <nav class="sidebar">
@@ -215,9 +245,9 @@
       on:input={onSearchInput}
       placeholder="search"
     />
-    <ul>
+    <ul on:contextmenu={onSidebarContextMenu}>
       {#each visibleNotes as name}
-        <li class:active={name === currentNote}>
+        <li class:active={name === currentNote} on:contextmenu={(e) => onNoteContextMenu(e, name)}>
           {#if renamingNote === name}
             <input
               class="rename-input"
@@ -269,6 +299,18 @@
 
   {#if saveStatus}
     <div class="save-toast">{saveStatus}</div>
+  {/if}
+
+  {#if contextMenu}
+    <div class="context-menu" style="left:{contextMenu.x}px; top:{contextMenu.y}px">
+      {#if contextMenu.type === 'empty'}
+        <button on:click={createNoteViaMenu}>新規ノート</button>
+      {:else if contextMenu.type === 'note' && contextMenu.note}
+        {@const noteName = contextMenu.note}
+        <button on:click={() => { closeContextMenu(); startRename(noteName) }}>名前を変更</button>
+        <button on:click={() => { closeContextMenu(); deleteNote(noteName) }}>削除</button>
+      {/if}
+    </div>
   {/if}
 </main>
 
@@ -438,5 +480,31 @@
     padding: 0.3rem 0.7rem;
     border-radius: 4px;
     font-size: 0.8rem;
+  }
+
+  .context-menu {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    background: #2a3548;
+    border: 1px solid #444;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    z-index: 10;
+  }
+
+  .context-menu button {
+    border: none;
+    background: none;
+    color: inherit;
+    text-align: left;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .context-menu button:hover {
+    background: rgba(124, 158, 255, 0.2);
   }
 </style>
