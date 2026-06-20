@@ -7,6 +7,7 @@
     SaveNote,
     CreateNote,
     DeleteNote,
+    RenameNote,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -15,6 +16,13 @@
   let html = ''
   let newNoteName = ''
   let saveTimer: ReturnType<typeof setTimeout>
+  let renamingNote: string | null = null
+  let renameValue = ''
+
+  function focusInput(el: HTMLInputElement): void {
+    el.focus()
+    el.select()
+  }
 
   async function refreshList(): Promise<void> {
     notes = await ListNotes()
@@ -56,6 +64,25 @@
     await refreshList()
   }
 
+  function startRename(name: string): void {
+    renamingNote = name
+    renameValue = name
+  }
+
+  function cancelRename(): void {
+    renamingNote = null
+  }
+
+  async function confirmRename(): Promise<void> {
+    const oldName = renamingNote
+    const newName = renameValue.trim()
+    renamingNote = null
+    if (!oldName || !newName || newName === oldName) return
+    await RenameNote(oldName, newName)
+    if (currentNote === oldName) currentNote = newName
+    await refreshList()
+  }
+
   async function onPreviewClick(e: MouseEvent): Promise<void> {
     const target = (e.target as HTMLElement).closest('a')
     if (!target) return
@@ -86,7 +113,24 @@
     <ul>
       {#each notes as name}
         <li class:active={name === currentNote}>
-          <span class="note-name" on:click={() => selectNote(name)}>{name}</span>
+          {#if renamingNote === name}
+            <input
+              class="rename-input"
+              use:focusInput
+              bind:value={renameValue}
+              on:keydown={(e) => {
+                if (e.key === 'Enter') confirmRename()
+                if (e.key === 'Escape') cancelRename()
+              }}
+              on:blur={confirmRename}
+            />
+          {:else}
+            <span
+              class="note-name"
+              on:click={() => selectNote(name)}
+              on:dblclick={() => startRename(name)}
+            >{name}</span>
+          {/if}
           <button class="delete" on:click={() => deleteNote(name)}>×</button>
         </li>
       {/each}
@@ -153,6 +197,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .rename-input {
+    flex: 1;
+    min-width: 0;
   }
 
   .delete {

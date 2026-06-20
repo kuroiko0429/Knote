@@ -101,3 +101,12 @@ func (a *App) CreateNote(name string) error {
 func (a *App) DeleteNote(name string) error {
 	return os.Remove(a.notePath(name))
 }
+
+// RenameNote renames a note. Returns an error if the new name is already taken
+func (a *App) RenameNote(oldName string, newName string) error {
+	newPath := a.notePath(newName)
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("note %q already exists", newName)
+	}
+	return os.Rename(a.notePath(oldName), newPath)
+}
