@@ -185,6 +185,35 @@ func (a *App) SearchNotes(query string) ([]string, error) {
 	return names, nil
 }
 
+// GetBacklinks returns the names of notes that contain a [[wikilink]] to the given note
+func (a *App) GetBacklinks(name string) ([]string, error) {
+	entries, err := os.ReadDir(a.vaultPath)
+	if err != nil {
+		return nil, err
+	}
+
+	pattern := regexp.MustCompile(`\[\[` + regexp.QuoteMeta(name) + `\]\]`)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		noteName := strings.TrimSuffix(e.Name(), ".md")
+		if noteName == name {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, e.Name()))
+		if err != nil {
+			continue
+		}
+		if pattern.Match(data) {
+			names = append(names, noteName)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 // ReadNote returns the content of the given note
 func (a *App) ReadNote(name string) (string, error) {
 	data, err := os.ReadFile(a.notePath(name))

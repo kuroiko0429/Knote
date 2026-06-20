@@ -15,6 +15,7 @@
     SearchNotes,
     GetVaultPath,
     SelectVault,
+    GetBacklinks,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -22,6 +23,7 @@
   let currentNote: string | null = null
   let source = ''
   let html = ''
+  let backlinks: string[] = []
   let newNoteName = ''
   let saveTimer: ReturnType<typeof setTimeout>
   let renamingNote: string | null = null
@@ -53,6 +55,7 @@
     source = await ReadNote(name)
     currentNote = name
     await render()
+    backlinks = await GetBacklinks(name)
   }
 
   async function render(): Promise<void> {
@@ -106,6 +109,7 @@
       currentNote = null
       source = ''
       html = ''
+      backlinks = []
     }
     await refreshList()
   }
@@ -130,6 +134,7 @@
     if (currentNote) {
       source = await ReadNote(currentNote)
       await render()
+      backlinks = await GetBacklinks(currentNote)
     }
   }
 
@@ -152,6 +157,7 @@
     currentNote = null
     source = ''
     html = ''
+    backlinks = []
     searchQuery = ''
     await refreshList()
   }
@@ -213,7 +219,19 @@
     {#key currentNote}
       <div class="editor" use:initEditor></div>
     {/key}
-    <div class="preview" on:click={onPreviewClick}>{@html html}</div>
+    <div class="preview">
+      <div on:click={onPreviewClick}>{@html html}</div>
+      {#if backlinks.length}
+        <div class="backlinks">
+          <div class="backlinks-title">バックリンク</div>
+          <ul>
+            {#each backlinks as name}
+              <li><span class="note-name" on:click={() => selectNote(name)}>{name}</span></li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+    </div>
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
@@ -340,6 +358,32 @@
 
   .preview :global(a[href^='knote:']:hover) {
     text-decoration: underline;
+  }
+
+  .backlinks {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid #444;
+  }
+
+  .backlinks-title {
+    font-size: 0.75rem;
+    opacity: 0.6;
+    margin-bottom: 0.4rem;
+  }
+
+  .backlinks ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .backlinks li {
+    padding: 0.2rem 0;
+  }
+
+  .backlinks .note-name {
+    color: #7c9eff;
   }
 
   .empty {
