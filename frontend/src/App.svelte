@@ -219,18 +219,23 @@
     expanded = next
   }
 
-  async function createNoteViaMenu(): Promise<void> {
+  async function createNoteAt(folderPath: string): Promise<void> {
     closeContextMenu()
-    let name = '無題'
+    let base = '無題'
     let i = 1
-    while (notes.includes(name)) {
-      name = `無題${i}`
+    let path = folderPath ? `${folderPath}/${base}` : base
+    while (notes.includes(path)) {
+      base = `無題${i}`
+      path = folderPath ? `${folderPath}/${base}` : base
       i++
     }
-    await CreateNote(name)
+    await CreateNote(path)
+    if (folderPath && !expanded.has(folderPath)) {
+      expanded = new Set(expanded).add(folderPath)
+    }
     await refreshList()
-    await selectNote(name)
-    startRename(name)
+    await selectNote(path)
+    startRename(path)
   }
 
   async function createFolderViaMenu(): Promise<void> {
@@ -439,14 +444,16 @@
   {#if contextMenu}
     <div class="context-menu" style="left:{contextMenu.x}px; top:{contextMenu.y}px">
       {#if contextMenu.type === 'empty'}
-        <button on:click={createNoteViaMenu}>新規ノート</button>
+        <button on:click={() => createNoteAt('')}>新規ノート</button>
         <button on:click={createFolderViaMenu}>新規フォルダ</button>
       {:else if contextMenu.type === 'note' && contextMenu.path}
         {@const path = contextMenu.path}
+        <button on:click={() => createNoteAt(dirname(path))}>新規ノート</button>
         <button on:click={() => { closeContextMenu(); startRename(path) }}>名前を変更</button>
         <button on:click={() => { closeContextMenu(); deleteNote(path) }}>削除</button>
       {:else if contextMenu.type === 'folder' && contextMenu.path}
         {@const path = contextMenu.path}
+        <button on:click={() => createNoteAt(path)}>新規ノート</button>
         <button on:click={() => { closeContextMenu(); startRenameFolder(path) }}>名前を変更</button>
       {/if}
     </div>
