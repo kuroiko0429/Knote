@@ -31,6 +31,10 @@
   let searchQuery = ''
   let searchTimer: ReturnType<typeof setTimeout>
   let vaultPath = ''
+  let newNoteInputEl: HTMLInputElement
+  let searchInputEl: HTMLInputElement
+  let saveStatus = ''
+  let saveStatusTimer: ReturnType<typeof setTimeout>
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -67,6 +71,29 @@
     if (!currentNote) return
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => SaveNote(currentNote!, source), 400)
+  }
+
+  async function forceSave(): Promise<void> {
+    if (!currentNote) return
+    clearTimeout(saveTimer)
+    await SaveNote(currentNote, source)
+    saveStatus = '保存しました'
+    clearTimeout(saveStatusTimer)
+    saveStatusTimer = setTimeout(() => (saveStatus = ''), 1500)
+  }
+
+  function onGlobalKeydown(e: KeyboardEvent): void {
+    if (!(e.ctrlKey || e.metaKey)) return
+    if (e.key === 's') {
+      e.preventDefault()
+      forceSave()
+    } else if (e.key === 'n') {
+      e.preventDefault()
+      newNoteInputEl?.focus()
+    } else if (e.key === 'f') {
+      e.preventDefault()
+      searchInputEl?.focus()
+    }
   }
 
   function initEditor(el: HTMLDivElement): { destroy(): void } {
@@ -168,10 +195,13 @@
   })
 </script>
 
+<svelte:window on:keydown={onGlobalKeydown} />
+
 <main>
   <nav class="sidebar">
     <div class="new-note">
       <input
+        bind:this={newNoteInputEl}
         bind:value={newNoteName}
         on:keydown={(e) => e.key === 'Enter' && newNote()}
         placeholder="new note name"
@@ -179,6 +209,7 @@
       <button on:click={newNote}>+</button>
     </div>
     <input
+      bind:this={searchInputEl}
       class="search"
       bind:value={searchQuery}
       on:input={onSearchInput}
@@ -234,6 +265,10 @@
     </div>
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
+  {/if}
+
+  {#if saveStatus}
+    <div class="save-toast">{saveStatus}</div>
   {/if}
 </main>
 
@@ -392,5 +427,16 @@
     align-items: center;
     justify-content: center;
     opacity: 0.5;
+  }
+
+  .save-toast {
+    position: fixed;
+    top: 0.75rem;
+    right: 0.75rem;
+    background: rgba(124, 158, 255, 0.9);
+    color: #1b2636;
+    padding: 0.3rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
   }
 </style>
