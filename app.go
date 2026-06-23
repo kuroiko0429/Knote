@@ -384,25 +384,128 @@ func (a *App) RenameFolder(oldRelPath string, newRelPath string) error {
 }
 
 // SearchNotes returns the paths of notes whose path or content contains query
+type searchToken struct {
+	kind  string // "", "tag", "file", "path", "line", or "section"
+	value string
+}
+
+func parseSearchQuery(query string) []searchToken {
+	var tokens []searchToken
+	for _, raw := range strings.Fields(query) {
+		kind, value := "", raw
+		for _, p := range []string{"tag:", "file:", "path:", "line:", "section:"} {
+			if strings.HasPrefix(strings.ToLower(raw), p) {
+				kind = strings.TrimSuffix(p, ":")
+				value = raw[len(p):]
+				break
+			}
+		}
+		value = strings.ToLower(value)
+		if kind == "tag" {
+			value = strings.TrimPrefix(value, "#")
+		}
+		if value == "" {
+			continue
+		}
+		tokens = append(tokens, searchToken{kind, value})
+	}
+	return tokens
+}
+
+// splitSections breaks markdown content into chunks delimited by ATX headings
+func splitSections(content string) []string {
+	headingPattern := regexp.MustCompile(`(?m)^#{1,6}\s`)
+	var sections []string
+	var current strings.Builder
+	for _, line := range strings.Split(content, "\n") {
+		if headingPattern.MatchString(line) && current.Len() > 0 {
+			sections = append(sections, current.String())
+			current.Reset()
+		}
+		current.WriteString(line)
+		current.WriteString("\n")
+	}
+	if current.Len() > 0 {
+		sections = append(sections, current.String())
+	}
+	return sections
+}
+
+// SearchNotes returns the paths of notes matching a space-separated query.
+// Bare terms match the note's path or content. Terms may be prefixed with
+// tag:, file:, path:, line:, or section: to scope the match; all terms must
+// match (AND) for a note to be included.
 func (a *App) SearchNotes(query string) ([]string, error) {
-	q := strings.ToLower(strings.TrimSpace(query))
-	if q == "" {
+	tokens := parseSearchQuery(query)
+	if len(tokens) == 0 {
 		return a.ListNotes()
 	}
 
 	names := []string{}
 	err := a.walkNotes(func(relPath string) error {
-		if strings.Contains(strings.ToLower(relPath), q) {
-			names = append(names, relPath)
-			return nil
-		}
 		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
 		if err != nil {
 			return nil
 		}
-		if strings.Contains(strings.ToLower(string(data)), q) {
-			names = append(names, relPath)
+		content := strings.ToLower(string(data))
+		lowerPath := strings.ToLower(relPath)
+		base := lowerPath
+		if i := strings.LastIndex(base, "/"); i != -1 {
+			base = base[i+1:]
 		}
+
+		var tags []string
+		var lines, sections []string
+		tagsLoaded, linesLoaded, sectionsLoaded := false, false, false
+
+		for _, t := range tokens {
+			matched := false
+			switch t.kind {
+			case "tag":
+				if !tagsLoaded {
+					tags, _ = parseFrontmatter(string(data))
+					tagsLoaded = true
+				}
+				for _, tg := range tags {
+					if strings.Contains(strings.ToLower(tg), t.value) {
+						matched = true
+						break
+					}
+				}
+			case "file":
+				matched = strings.Contains(base, t.value)
+			case "path":
+				matched = strings.Contains(lowerPath, t.value)
+			case "line":
+				if !linesLoaded {
+					lines = strings.Split(content, "\n")
+					linesLoaded = true
+				}
+				for _, ln := range lines {
+					if strings.Contains(ln, t.value) {
+						matched = true
+						break
+					}
+				}
+			case "section":
+				if !sectionsLoaded {
+					sections = splitSections(content)
+					sectionsLoaded = true
+				}
+				for _, sec := range sections {
+					if strings.Contains(sec, t.value) {
+						matched = true
+						break
+					}
+				}
+			default:
+				matched = strings.Contains(lowerPath, t.value) || strings.Contains(content, t.value)
+			}
+			if !matched {
+				return nil
+			}
+		}
+		names = append(names, relPath)
 		return nil
 	})
 	if err != nil {

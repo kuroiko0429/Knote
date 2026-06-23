@@ -654,7 +654,8 @@
         class="search"
         bind:value={searchQuery}
         on:input={onSearchInput}
-        placeholder="search"
+        placeholder="search (tag: file: path: line: section:)"
+        title="例: tag:work file:meeting hello"
       />
     </div>
     <ul
