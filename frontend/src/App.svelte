@@ -611,11 +611,13 @@
     style="left: {sidebarWidth - 2}px"
     on:pointerdown={(e) => startDrag('sidebar', e)}
   ></div>
-  <div
-    class="resize-handle resize-handle-v"
-    style="left: {sidebarWidth + editorWidth - 2}px"
-    on:pointerdown={(e) => startDrag('editor', e)}
-  ></div>
+  {#if currentNote && !showGraph}
+    <div
+      class="resize-handle resize-handle-v"
+      style="left: {sidebarWidth + editorWidth - 2}px"
+      on:pointerdown={(e) => startDrag('editor', e)}
+    ></div>
+  {/if}
 
   {#if showGraph}
     <div class="graph-view">
