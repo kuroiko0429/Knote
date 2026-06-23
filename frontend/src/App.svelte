@@ -81,6 +81,7 @@
   let showGraph = false
   let graphEdges: { source: string; target: string }[] = []
   let currentNote: string | null = null
+  let openTabs: string[] = []
   let source = ''
   let html = ''
   let backlinks: string[] = []
@@ -150,7 +151,7 @@
       await CreateNote(path)
       await refreshList()
     }
-    await selectNote(path)
+    await openTab(path)
   }
 
   function onQsKeydown(e: KeyboardEvent): void {
@@ -309,7 +310,7 @@
       await CreateNote(name)
       await refreshList()
     }
-    await selectNote(name)
+    await openTab(name)
   }
 
   async function runSearch(): Promise<void> {
@@ -344,6 +345,37 @@
     await render()
     backlinks = await GetBacklinks(name)
     noteTags = await GetTags(name)
+  }
+
+  async function openTab(path: string): Promise<void> {
+    if (currentNote) {
+      clearTimeout(saveTimer)
+      await SaveNote(currentNote, source)
+    }
+    if (!openTabs.includes(path)) {
+      openTabs = [...openTabs, path]
+    }
+    await selectNote(path)
+  }
+
+  function closeTab(path: string, e?: MouseEvent): void {
+    e?.stopPropagation()
+    const idx = openTabs.indexOf(path)
+    if (idx === -1) return
+    openTabs = openTabs.filter((p) => p !== path)
+    if (currentNote !== path) return
+
+    const next = openTabs[idx] ?? openTabs[idx - 1]
+    if (next) {
+      openTab(next)
+    } else {
+      currentNote = null
+      source = ''
+      html = ''
+      backlinks = []
+      noteTags = []
+      outline = []
+    }
   }
 
   async function render(): Promise<void> {
@@ -643,7 +675,7 @@
       expanded = new Set(expanded).add(folderPath)
     }
     await refreshList()
-    await selectNote(path)
+    await openTab(path)
     startRename(path)
   }
 
@@ -660,15 +692,22 @@
     startRenameFolder(name)
   }
 
+  function clearCurrentNoteView(): void {
+    currentNote = null
+    source = ''
+    html = ''
+    backlinks = []
+    noteTags = []
+    outline = []
+  }
+
   async function deleteNote(name: string): Promise<void> {
     await DeleteNote(name)
+    openTabs = openTabs.filter((p) => p !== name)
     if (currentNote === name) {
-      currentNote = null
-      source = ''
-      html = ''
-      backlinks = []
-      noteTags = []
-      outline = []
+      const next = openTabs[0]
+      if (next) await openTab(next)
+      else clearCurrentNoteView()
     }
     await refreshList()
   }
@@ -709,8 +748,13 @@
         next.add(newPath)
         expanded = next
       }
+      openTabs = openTabs.map((p) => (p === oldPath || p.startsWith(oldPath + '/') ? newPath + p.slice(oldPath.length) : p))
+      if (currentNote === oldPath || currentNote?.startsWith(oldPath + '/')) {
+        currentNote = newPath + currentNote!.slice(oldPath.length)
+      }
     } else {
       await RenameNote(oldPath, newPath)
+      openTabs = openTabs.map((p) => (p === oldPath ? newPath : p))
       if (currentNote === oldPath) currentNote = newPath
     }
 
@@ -742,8 +786,13 @@
         next.add(newPath)
         expanded = next
       }
+      openTabs = openTabs.map((p) => (p === path || p.startsWith(path + '/') ? newPath + p.slice(path.length) : p))
+      if (currentNote === path || currentNote?.startsWith(path + '/')) {
+        currentNote = newPath + currentNote!.slice(path.length)
+      }
     } else {
       await RenameNote(path, newPath)
+      openTabs = openTabs.map((p) => (p === path ? newPath : p))
       if (currentNote === path) currentNote = newPath
     }
 
@@ -771,16 +820,13 @@
       await CreateNote(name)
       await refreshList()
     }
-    await selectNote(name)
+    await openTab(name)
   }
 
   async function changeVault(): Promise<void> {
     vaultPath = await SelectVault()
-    currentNote = null
-    source = ''
-    html = ''
-    backlinks = []
-    noteTags = []
+    openTabs = []
+    clearCurrentNoteView()
     searchQuery = ''
     activeTag = null
     await refreshList()
@@ -788,13 +834,9 @@
 
   async function onVaultChanged(): Promise<void> {
     await refreshList()
+    openTabs = openTabs.filter((p) => notes.includes(p))
     if (currentNote && !notes.includes(currentNote)) {
-      currentNote = null
-      source = ''
-      html = ''
-      backlinks = []
-      noteTags = []
-      outline = []
+      clearCurrentNoteView()
     } else if (currentNote) {
       backlinks = await GetBacklinks(currentNote)
       noteTags = await GetTags(currentNote)
@@ -911,7 +953,7 @@
             {:else}
               <span
                 class="note-name"
-                on:click={() => selectNote(path)}
+                on:click={() => openTab(path)}
                 on:dblclick={() => startRename(path)}
               >{path}</span>
             {/if}
@@ -927,7 +969,7 @@
             {renamingType}
             bind:renameValue
             {expanded}
-            onSelect={selectNote}
+            onSelect={openTab}
             {onToggle}
             onRenameStartNote={startRename}
             onRenameStartFolder={startRenameFolder}
@@ -954,6 +996,22 @@
       style="left: {sidebarWidth + editorWidth - 2}px"
       on:pointerdown={(e) => startDrag('editor', e)}
     ></div>
+  {/if}
+
+  {#if openTabs.length && !showGraph}
+    <div class="tab-bar">
+      {#each openTabs as path (path)}
+        <div
+          class="tab"
+          class:active={path === currentNote}
+          on:click={() => openTab(path)}
+        >
+          <FileText size={13} />
+          <span class="tab-label">{basename(path)}</span>
+          <button class="tab-close" on:click={(e) => closeTab(path, e)}><X size={12} /></button>
+        </div>
+      {/each}
+    </div>
   {/if}
 
   {#if showGraph}
@@ -1003,7 +1061,7 @@
           <div class="backlinks-title"><Link2 size={13} /> バックリンク</div>
           <ul>
             {#each backlinks as name}
-              <li><span class="note-name" on:click={() => selectNote(name)}>{name}</span></li>
+              <li><span class="note-name" on:click={() => openTab(name)}>{name}</span></li>
             {/each}
           </ul>
         </div>
@@ -1150,7 +1208,7 @@
   main {
     position: relative;
     display: grid;
-    grid-template-rows: auto 1fr auto auto;
+    grid-template-rows: auto auto 1fr auto auto;
     height: 100vh;
   }
 
@@ -1260,11 +1318,60 @@
 
   .sidebar {
     grid-column: 1;
-    grid-row: 2 / 4;
+    grid-row: 3 / 5;
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+
+  .tab-bar {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    display: flex;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.5rem;
+    border-right: 1px solid var(--border);
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .tab.active {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .tab-label {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tab-close {
+    display: flex;
+    align-items: center;
+    border: none;
+    background: none;
+    color: inherit;
+    opacity: 0.5;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+
+  .tab-close:hover {
+    opacity: 1;
+    background: var(--bg-hover);
   }
 
   .search-box {
@@ -1393,7 +1500,7 @@
 
 
   .editor {
-    grid-row: 2;
+    grid-row: 3;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1455,7 +1562,7 @@
   }
 
   .preview {
-    grid-row: 2;
+    grid-row: 3;
     padding: 1rem;
     overflow-y: auto;
     border-left: 1px solid var(--border);
@@ -1573,7 +1680,7 @@
 
   .empty {
     grid-column: 2 / 4;
-    grid-row: 2;
+    grid-row: 3;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1582,14 +1689,14 @@
 
   .graph-view {
     grid-column: 2 / 4;
-    grid-row: 2;
+    grid-row: 3;
     min-height: 0;
     overflow: hidden;
   }
 
   .bottombar {
     grid-column: 1 / 4;
-    grid-row: 4;
+    grid-row: 5;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1601,7 +1708,7 @@
   .terminal-panel {
     position: relative;
     grid-column: 2 / 4;
-    grid-row: 3;
+    grid-row: 4;
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border);
