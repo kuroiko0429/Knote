@@ -20,6 +20,7 @@ import (
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
+	"gopkg.in/yaml.v3"
 )
 
 // App struct
@@ -187,16 +188,105 @@ func (a *App) SelectVault() (string, error) {
 	return a.vaultPath, nil
 }
 
+var frontmatterPattern = regexp.MustCompile(`(?s)^---\r?\n(.*?)\r?\n---\r?\n?`)
+
+type frontmatter struct {
+	Tags []string `yaml:"tags"`
+}
+
+// parseFrontmatter extracts YAML frontmatter (delimited by --- lines) from
+// the start of a note, returning its tags and the remaining body
+func parseFrontmatter(content string) ([]string, string) {
+	m := frontmatterPattern.FindStringSubmatch(content)
+	if m == nil {
+		return nil, content
+	}
+
+	var fm frontmatter
+	if err := yaml.Unmarshal([]byte(m[1]), &fm); err != nil {
+		return nil, content
+	}
+
+	body := content[len(m[0]):]
+	return fm.Tags, body
+}
+
 // RenderMarkdown converts markdown source to HTML. [[note]] wikilinks are
 // rewritten into knote:// links so the frontend can intercept clicks on them.
+// Any leading YAML frontmatter is stripped from the rendered output.
 func (a *App) RenderMarkdown(src string) string {
-	src = wikilinkPattern.ReplaceAllString(src, "[$1](<knote:$1>)")
+	_, body := parseFrontmatter(src)
+	body = wikilinkPattern.ReplaceAllString(body, "[$1](<knote:$1>)")
 
 	var buf bytes.Buffer
-	if err := a.md.Convert([]byte(src), &buf); err != nil {
+	if err := a.md.Convert([]byte(body), &buf); err != nil {
 		return ""
 	}
 	return buf.String()
+}
+
+// GetTags returns the tags declared in the given note's frontmatter
+func (a *App) GetTags(name string) ([]string, error) {
+	data, err := os.ReadFile(a.notePath(name))
+	if err != nil {
+		return nil, err
+	}
+	tags, _ := parseFrontmatter(string(data))
+	if tags == nil {
+		tags = []string{}
+	}
+	sort.Strings(tags)
+	return tags, nil
+}
+
+// ListAllTags returns every unique tag used across the vault, sorted alphabetically
+func (a *App) ListAllTags() ([]string, error) {
+	seen := map[string]bool{}
+	err := a.walkNotes(func(relPath string) error {
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
+		if err != nil {
+			return nil
+		}
+		tags, _ := parseFrontmatter(string(data))
+		for _, t := range tags {
+			seen[t] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tags := make([]string, 0, len(seen))
+	for t := range seen {
+		tags = append(tags, t)
+	}
+	sort.Strings(tags)
+	return tags, nil
+}
+
+// SearchByTag returns the paths of notes whose frontmatter contains the given tag
+func (a *App) SearchByTag(tag string) ([]string, error) {
+	names := []string{}
+	err := a.walkNotes(func(relPath string) error {
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
+		if err != nil {
+			return nil
+		}
+		tags, _ := parseFrontmatter(string(data))
+		for _, t := range tags {
+			if t == tag {
+				names = append(names, relPath)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (a *App) notePath(name string) string {

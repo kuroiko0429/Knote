@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { EventsOn } from '../wailsjs/runtime/runtime'
-  import { EditorView, basicSetup } from 'codemirror'
+  import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
   import { EditorState } from '@codemirror/state'
+  import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
   import { markdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
-  import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+  import { HighlightStyle, syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language'
   import { tags } from '@lezer/highlight'
   import TreeItem from './TreeItem.svelte'
   import type { TreeNode } from './TreeItem.svelte'
@@ -27,6 +28,7 @@
     Sun,
     Moon,
     TerminalSquare,
+    Tag,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -44,6 +46,9 @@
     SelectVault,
     GetBacklinks,
     GetGraph,
+    GetTags,
+    ListAllTags,
+    SearchByTag,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -70,6 +75,9 @@
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
+  let allTags: string[] = []
+  let activeTag: string | null = null
+  let noteTags: string[] = []
 
   function toggleTheme(): void {
     theme = theme === 'dark' ? 'light' : 'dark'
@@ -172,7 +180,7 @@
   }
 
   $: tree = buildTree(folders, notes)
-  $: isSearching = searchQuery.trim().length > 0
+  $: isFiltering = searchQuery.trim().length > 0 || activeTag !== null
   $: breadcrumb = currentNote ? currentNote.split('/').join(' / ') : ''
 
   function countChars(htmlStr: string): number {
@@ -191,6 +199,7 @@
   async function refreshList(): Promise<void> {
     notes = await ListNotes()
     folders = await ListFolders()
+    allTags = await ListAllTags()
     await runSearch()
     if (showGraph) graphEdges = (await GetGraph()).edges
   }
@@ -211,7 +220,14 @@
   }
 
   async function runSearch(): Promise<void> {
-    visibleNotes = searchQuery.trim() ? await SearchNotes(searchQuery) : notes
+    if (searchQuery.trim()) {
+      activeTag = null
+      visibleNotes = await SearchNotes(searchQuery)
+    } else if (activeTag) {
+      visibleNotes = await SearchByTag(activeTag)
+    } else {
+      visibleNotes = notes
+    }
   }
 
   function onSearchInput(): void {
@@ -219,11 +235,22 @@
     searchTimer = setTimeout(runSearch, 200)
   }
 
+  async function selectTag(tag: string): Promise<void> {
+    if (activeTag === tag) {
+      activeTag = null
+    } else {
+      activeTag = tag
+      searchQuery = ''
+    }
+    await runSearch()
+  }
+
   async function selectNote(name: string): Promise<void> {
     source = await ReadNote(name)
     currentNote = name
     await render()
     backlinks = await GetBacklinks(name)
+    noteTags = await GetTags(name)
   }
 
   async function render(): Promise<void> {
@@ -282,7 +309,17 @@
       state: EditorState.create({
         doc: source,
         extensions: [
-          basicSetup,
+          lineNumbers(),
+          highlightSpecialChars(),
+          history(),
+          drawSelection(),
+          dropCursor(),
+          EditorState.allowMultipleSelections.of(true),
+          indentOnInput(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          bracketMatching(),
+          highlightActiveLine(),
+          keymap.of([...defaultKeymap, ...historyKeymap]),
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
@@ -379,6 +416,7 @@
       source = ''
       html = ''
       backlinks = []
+      noteTags = []
     }
     await refreshList()
   }
@@ -429,6 +467,7 @@
       source = await ReadNote(currentNote)
       await render()
       backlinks = await GetBacklinks(currentNote)
+      noteTags = await GetTags(currentNote)
     }
   }
 
@@ -465,6 +504,7 @@
       source = await ReadNote(currentNote)
       await render()
       backlinks = await GetBacklinks(currentNote)
+      noteTags = await GetTags(currentNote)
     }
   }
 
@@ -488,7 +528,9 @@
     source = ''
     html = ''
     backlinks = []
+    noteTags = []
     searchQuery = ''
+    activeTag = null
     await refreshList()
   }
 
@@ -499,8 +541,10 @@
       source = ''
       html = ''
       backlinks = []
+      noteTags = []
     } else if (currentNote) {
       backlinks = await GetBacklinks(currentNote)
+      noteTags = await GetTags(currentNote)
     }
   }
 
@@ -552,14 +596,35 @@
         placeholder="search"
       />
     </div>
+    {#if allTags.length}
+      <div class="tag-list">
+        {#each allTags as tag}
+          <button
+            class="tag-chip"
+            class:active={activeTag === tag}
+            on:click={() => selectTag(tag)}
+          ><Tag size={11} />{tag}</button>
+        {/each}
+      </div>
+    {/if}
     <ul
       on:contextmenu={onSidebarContextMenu}
       on:dragover={(e) => e.preventDefault()}
       on:drop={(e) => moveTo('', e)}
     >
-      {#if isSearching}
+      {#if isFiltering}
         {#each visibleNotes as path}
-          <li class:active={path === currentNote} on:contextmenu={(e) => onNoteContextMenu(e, path)}>
+          <li
+            class:active={path === currentNote}
+            draggable="true"
+            on:dragstart={(e) => {
+              e.dataTransfer?.setData('text/plain', JSON.stringify({ path, type: 'note' }))
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+            }}
+            on:dragover={(e) => e.preventDefault()}
+            on:drop={(e) => moveTo(dirname(path), e)}
+            on:contextmenu={(e) => onNoteContextMenu(e, path)}
+          >
             {#if renamingPath === path && renamingType === 'note'}
               <input
                 class="rename-input"
@@ -628,6 +693,13 @@
       <div class="editor" use:initEditor></div>
     {/key}
     <div class="preview">
+      {#if noteTags.length}
+        <div class="note-tags">
+          {#each noteTags as tag}
+            <button class="tag-chip" on:click={() => selectTag(tag)}><Tag size={11} />{tag}</button>
+          {/each}
+        </div>
+      {/if}
       <div on:click={onPreviewClick}>{@html html}</div>
       {#if backlinks.length}
         <div class="backlinks">
@@ -816,6 +888,43 @@
     width: 100%;
     box-sizing: border-box;
     padding-left: 1.8rem;
+  }
+
+  .tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0 0.5rem 0.5rem;
+  }
+
+  .tag-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-dim);
+    border-radius: 10px;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+  }
+
+  .tag-chip:hover {
+    color: var(--text);
+  }
+
+  .tag-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .note-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 1rem;
   }
 
   ul {
