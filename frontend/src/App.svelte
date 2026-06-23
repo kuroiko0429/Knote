@@ -47,7 +47,6 @@
     GetBacklinks,
     GetGraph,
     GetTags,
-    ListAllTags,
     SearchByTag,
   } from '../wailsjs/go/main/App.js'
 
@@ -75,7 +74,6 @@
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
-  let allTags: string[] = []
   let activeTag: string | null = null
   let noteTags: string[] = []
 
@@ -199,7 +197,6 @@
   async function refreshList(): Promise<void> {
     notes = await ListNotes()
     folders = await ListFolders()
-    allTags = await ListAllTags()
     await runSearch()
     if (showGraph) graphEdges = (await GetGraph()).edges
   }
@@ -596,17 +593,6 @@
         placeholder="search"
       />
     </div>
-    {#if allTags.length}
-      <div class="tag-list">
-        {#each allTags as tag}
-          <button
-            class="tag-chip"
-            class:active={activeTag === tag}
-            on:click={() => selectTag(tag)}
-          ><Tag size={11} />{tag}</button>
-        {/each}
-      </div>
-    {/if}
     <ul
       on:contextmenu={onSidebarContextMenu}
       on:dragover={(e) => e.preventDefault()}
@@ -890,13 +876,6 @@
     padding-left: 1.8rem;
   }
 
-  .tag-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    padding: 0 0.5rem 0.5rem;
-  }
-
   .tag-chip {
     display: flex;
     align-items: center;
@@ -912,12 +891,6 @@
 
   .tag-chip:hover {
     color: var(--text);
-  }
-
-  .tag-chip.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-contrast);
   }
 
   .note-tags {
