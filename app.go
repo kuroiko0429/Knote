@@ -86,9 +86,13 @@ func (a *App) startWatcher() {
 	a.watcher = w
 
 	filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() {
-			w.Add(path)
+		if err != nil || !d.IsDir() {
+			return nil
 		}
+		if path != a.vaultPath && strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir
+		}
+		w.Add(path)
 		return nil
 	})
 
@@ -301,7 +305,13 @@ func (a *App) walkNotes(fn func(relPath string) error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+		if d.IsDir() {
+			if path != a.vaultPath && strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
 		}
 		rel, err := filepath.Rel(a.vaultPath, path)
@@ -329,11 +339,14 @@ func (a *App) ListNotes() ([]string, error) {
 func (a *App) ListFolders() ([]string, error) {
 	folders := []string{}
 	err := filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == a.vaultPath || !d.IsDir() {
+		if err != nil || !d.IsDir() {
 			return nil
+		}
+		if path == a.vaultPath {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir
 		}
 		rel, err := filepath.Rel(a.vaultPath, path)
 		if err != nil {
