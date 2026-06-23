@@ -86,6 +86,43 @@
     showTerminal = !showTerminal
   }
 
+  let mainEl: HTMLElement
+  let terminalPanelEl: HTMLDivElement
+  let sidebarWidth = 200
+  let editorWidth = 400
+  let terminalHeight = 260
+  let dragging: 'sidebar' | 'editor' | 'terminal' | null = null
+
+  onMount(() => {
+    if (mainEl) {
+      editorWidth = Math.max(200, (mainEl.clientWidth - sidebarWidth) / 2)
+    }
+  })
+
+  function startDrag(which: 'sidebar' | 'editor' | 'terminal', e: PointerEvent): void {
+    dragging = which
+    document.body.style.userSelect = 'none'
+    e.preventDefault()
+  }
+
+  function onDragMove(e: PointerEvent): void {
+    if (!dragging || !mainEl) return
+    if (dragging === 'sidebar') {
+      sidebarWidth = Math.max(140, Math.min(480, e.clientX))
+    } else if (dragging === 'editor') {
+      const maxEditor = mainEl.clientWidth - sidebarWidth - 200
+      editorWidth = Math.max(200, Math.min(maxEditor, e.clientX - sidebarWidth))
+    } else if (dragging === 'terminal' && terminalPanelEl) {
+      const rect = terminalPanelEl.getBoundingClientRect()
+      terminalHeight = Math.max(120, Math.min(600, rect.bottom - e.clientY))
+    }
+  }
+
+  function endDrag(): void {
+    dragging = null
+    document.body.style.userSelect = ''
+  }
+
   function basename(path: string): string {
     const i = path.lastIndexOf('/')
     return i === -1 ? path : path.slice(i + 1)
@@ -474,9 +511,14 @@
   })
 </script>
 
-<svelte:window on:keydown={onGlobalKeydown} on:click={closeContextMenu} />
+<svelte:window
+  on:keydown={onGlobalKeydown}
+  on:click={closeContextMenu}
+  on:pointermove={onDragMove}
+  on:pointerup={endDrag}
+/>
 
-<main>
+<main bind:this={mainEl} style="grid-template-columns: {sidebarWidth}px {editorWidth}px 1fr">
   <header class="topbar">
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
@@ -566,6 +608,17 @@
     </ul>
   </nav>
 
+  <div
+    class="resize-handle resize-handle-v"
+    style="left: {sidebarWidth - 2}px"
+    on:pointerdown={(e) => startDrag('sidebar', e)}
+  ></div>
+  <div
+    class="resize-handle resize-handle-v"
+    style="left: {sidebarWidth + editorWidth - 2}px"
+    on:pointerdown={(e) => startDrag('editor', e)}
+  ></div>
+
   {#if showGraph}
     <div class="graph-view">
       <GraphView {notes} edges={graphEdges} {currentNote} on:select={onGraphSelect} />
@@ -591,7 +644,16 @@
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
 
-  <div class="terminal-panel" class:hidden={!showTerminal}>
+  <div
+    class="terminal-panel"
+    class:hidden={!showTerminal}
+    bind:this={terminalPanelEl}
+    style="height: {terminalHeight}px"
+  >
+    <div
+      class="resize-handle resize-handle-h"
+      on:pointerdown={(e) => startDrag('terminal', e)}
+    ></div>
     <div class="terminal-panel-header">
       <span><TerminalSquare size={13} /> ターミナル</span>
       <button on:click={toggleTerminal}><X size={14} /></button>
@@ -643,10 +705,39 @@
   }
 
   main {
+    position: relative;
     display: grid;
-    grid-template-columns: 200px 1fr 1fr;
     grid-template-rows: auto 1fr auto auto;
     height: 100vh;
+  }
+
+  .resize-handle {
+    position: absolute;
+    z-index: 5;
+  }
+
+  .resize-handle-v {
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    cursor: col-resize;
+  }
+
+  .resize-handle-v:hover {
+    background: var(--accent-hover);
+  }
+
+  .resize-handle-h {
+    top: -3px;
+    left: 0;
+    right: 0;
+    height: 5px;
+    cursor: row-resize;
+    z-index: 6;
+  }
+
+  .resize-handle-h:hover {
+    background: var(--accent-hover);
   }
 
   .topbar {
@@ -882,9 +973,9 @@
   }
 
   .terminal-panel {
+    position: relative;
     grid-column: 2 / 4;
     grid-row: 3;
-    height: 260px;
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border);
