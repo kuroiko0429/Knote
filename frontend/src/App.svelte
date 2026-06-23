@@ -762,6 +762,21 @@
     text-decoration: underline;
   }
 
+  .preview :global(table) {
+    border-collapse: collapse;
+    margin: 1rem 0;
+  }
+
+  .preview :global(th),
+  .preview :global(td) {
+    border: 1px solid #444;
+    padding: 0.4rem 0.7rem;
+  }
+
+  .preview :global(th) {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
   .backlinks {
     margin-top: 2rem;
     padding-top: 1rem;

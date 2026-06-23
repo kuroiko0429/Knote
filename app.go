@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
+	"github.com/yuin/goldmark/extension"
 )
 
 // App struct
@@ -34,6 +35,8 @@ var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
 func NewApp() *App {
 	md := goldmark.New(
 		goldmark.WithExtensions(
+			extension.GFM,
+			extension.Footnote,
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("onedark"),
 			),
