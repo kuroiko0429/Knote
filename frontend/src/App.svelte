@@ -578,7 +578,6 @@
                 on:dblclick={() => startRename(path)}
               >{path}</span>
             {/if}
-            <button class="delete" on:click={() => deleteNote(path)}><Trash2 size={14} /></button>
           </li>
         {/each}
       {:else}
@@ -599,7 +598,6 @@
             onCancelRename={cancelRename}
             onNoteContext={onNoteContextMenu}
             onFolderContext={onFolderContextMenu}
-            onDeleteNote={deleteNote}
             onDrop={moveTo}
             focusInputAction={focusInput}
           />
@@ -858,16 +856,6 @@
     min-width: 0;
   }
 
-  .delete {
-    border: none;
-    background: none;
-    cursor: pointer;
-    opacity: 0.5;
-  }
-
-  .delete:hover {
-    opacity: 1;
-  }
 
   .editor {
     grid-row: 2;

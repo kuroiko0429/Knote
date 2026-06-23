@@ -5,7 +5,7 @@
 </script>
 
 <script lang="ts">
-  import { ChevronRight, ChevronDown, Folder, FolderOpen, FileText, Trash2 } from 'lucide-svelte'
+  import { ChevronRight, ChevronDown, Folder, FolderOpen, FileText } from 'lucide-svelte'
 
   export let node: TreeNode
   export let depth: number
@@ -22,7 +22,6 @@
   export let onCancelRename: () => void
   export let onNoteContext: (e: MouseEvent, path: string) => void
   export let onFolderContext: (e: MouseEvent, path: string) => void
-  export let onDeleteNote: (path: string) => void
   export let onDrop: (targetFolder: string, e: DragEvent) => void
   export let focusInputAction: (el: HTMLInputElement) => void
 
@@ -103,7 +102,6 @@
         {onCancelRename}
         {onNoteContext}
         {onFolderContext}
-        {onDeleteNote}
         {onDrop}
         {focusInputAction}
       />
@@ -147,9 +145,6 @@
         {node.name}
       </span>
     {/if}
-    <button class="delete" on:click={() => onDeleteNote(node.path)}>
-      <Trash2 size={14} />
-    </button>
   </li>
 {/if}
 
@@ -201,14 +196,4 @@
     min-width: 0;
   }
 
-  .delete {
-    border: none;
-    background: none;
-    cursor: pointer;
-    opacity: 0.5;
-  }
-
-  .delete:hover {
-    opacity: 1;
-  }
 </style>
