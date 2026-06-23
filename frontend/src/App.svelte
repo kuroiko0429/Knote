@@ -79,6 +79,24 @@
   let searchTimer: ReturnType<typeof setTimeout>
   let vaultPath = ''
   let searchInputEl: HTMLInputElement
+  let searchFocused = false
+  let searchBlurTimer: ReturnType<typeof setTimeout>
+  const searchOperators = ['tag:', 'file:', 'path:', 'line:', 'section:']
+
+  function onSearchFocus(): void {
+    clearTimeout(searchBlurTimer)
+    searchFocused = true
+  }
+
+  function onSearchBlur(): void {
+    searchBlurTimer = setTimeout(() => (searchFocused = false), 150)
+  }
+
+  function insertSearchOperator(op: string): void {
+    searchQuery = searchQuery.trim() ? `${searchQuery.trim()} ${op}` : op
+    searchInputEl?.focus()
+    onSearchInput()
+  }
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
@@ -654,9 +672,17 @@
         class="search"
         bind:value={searchQuery}
         on:input={onSearchInput}
-        placeholder="search (tag: file: path: line: section:)"
-        title="例: tag:work file:meeting hello"
+        on:focus={onSearchFocus}
+        on:blur={onSearchBlur}
+        placeholder="search"
       />
+      {#if searchFocused}
+        <div class="search-hints">
+          {#each searchOperators as op}
+            <button on:click={() => insertSearchOperator(op)}>{op}</button>
+          {/each}
+        </div>
+      {/if}
     </div>
     <ul
       on:contextmenu={onSidebarContextMenu}
@@ -965,6 +991,37 @@
     transform: translateY(-50%);
     opacity: 0.5;
     pointer-events: none;
+  }
+
+  .search-hints {
+    position: absolute;
+    top: calc(100% + 0.3rem);
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0.4rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    z-index: 5;
+  }
+
+  .search-hints button {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+    border-radius: 10px;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.7rem;
+    font-family: monospace;
+    cursor: pointer;
+  }
+
+  .search-hints button:hover {
+    color: var(--text);
+    border-color: var(--accent);
   }
 
   .search {
