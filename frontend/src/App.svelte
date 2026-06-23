@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
-  import { EditorState } from '@codemirror/state'
+  import { EditorState, EditorSelection } from '@codemirror/state'
   import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
   import { markdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
@@ -29,6 +29,17 @@
     Moon,
     TerminalSquare,
     Tag,
+    Bold,
+    Italic,
+    Strikethrough,
+    Heading2,
+    Link as LinkIcon,
+    Code,
+    List,
+    Quote,
+    Columns2,
+    PanelLeft,
+    PanelRight,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -74,6 +85,7 @@
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
   let activeTag: string | null = null
   let noteTags: string[] = []
+  let viewMode: 'split' | 'editor' | 'preview' = 'split'
 
   function toggleTheme(): void {
     theme = theme === 'dark' ? 'light' : 'dark'
@@ -299,6 +311,8 @@
     { tag: tags.processingInstruction, opacity: '0.4' },
   ])
 
+  let editorView: EditorView | null = null
+
   function initEditor(el: HTMLDivElement): { destroy(): void } {
     const view = new EditorView({
       state: EditorState.create({
@@ -328,11 +342,62 @@
       }),
       parent: el,
     })
+    editorView = view
     return {
       destroy() {
         view.destroy()
+        if (editorView === view) editorView = null
       },
     }
+  }
+
+  function wrapSelection(before: string, after: string = before): void {
+    if (!editorView) return
+    const view = editorView
+    const tr = view.state.changeByRange((range) => {
+      const changes = [
+        { from: range.from, insert: before },
+        { from: range.to, insert: after },
+      ]
+      const newFrom = range.from + before.length
+      const newTo = range.to + before.length
+      return {
+        changes,
+        range: range.empty ? EditorSelection.cursor(newFrom) : EditorSelection.range(newFrom, newTo),
+      }
+    })
+    view.dispatch(view.state.update(tr))
+    view.focus()
+  }
+
+  function prefixLines(prefix: string): void {
+    if (!editorView) return
+    const view = editorView
+    const tr = view.state.changeByRange((range) => {
+      const startLine = view.state.doc.lineAt(range.from)
+      return {
+        changes: { from: startLine.from, insert: prefix },
+        range: EditorSelection.range(range.from + prefix.length, range.to + prefix.length),
+      }
+    })
+    view.dispatch(view.state.update(tr))
+    view.focus()
+  }
+
+  function insertLink(): void {
+    if (!editorView) return
+    const view = editorView
+    const tr = view.state.changeByRange((range) => {
+      const text = view.state.doc.sliceString(range.from, range.to)
+      const label = text || 'リンク'
+      const insert = `[${label}](url)`
+      return {
+        changes: [{ from: range.from, to: range.to, insert }],
+        range: EditorSelection.range(range.from + label.length + 3, range.from + label.length + 6),
+      }
+    })
+    view.dispatch(view.state.update(tr))
+    view.focus()
   }
 
   function closeContextMenu(): void {
@@ -553,6 +618,25 @@
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
       {#if breadcrumb}<span class="breadcrumb">{breadcrumb}</span>{/if}
+      {#if currentNote && !showGraph}
+        <div class="view-mode-toggle">
+          <button
+            class:active={viewMode === 'editor'}
+            on:click={() => (viewMode = 'editor')}
+            title="エディタのみ"
+          ><PanelLeft size={15} /></button>
+          <button
+            class:active={viewMode === 'split'}
+            on:click={() => (viewMode = 'split')}
+            title="分割表示"
+          ><Columns2 size={15} /></button>
+          <button
+            class:active={viewMode === 'preview'}
+            on:click={() => (viewMode = 'preview')}
+            title="プレビューのみ"
+          ><PanelRight size={15} /></button>
+        </div>
+      {/if}
       <button on:click={toggleTheme} title="テーマ切り替え">
         {#if theme === 'dark'}<Sun size={16} />{:else}<Moon size={16} />{/if}
       </button>
@@ -642,7 +726,7 @@
     style="left: {sidebarWidth - 2}px"
     on:pointerdown={(e) => startDrag('sidebar', e)}
   ></div>
-  {#if currentNote && !showGraph}
+  {#if currentNote && !showGraph && viewMode === 'split'}
     <div
       class="resize-handle resize-handle-v"
       style="left: {sidebarWidth + editorWidth - 2}px"
@@ -655,10 +739,22 @@
       <GraphView {notes} edges={graphEdges} {currentNote} on:select={onGraphSelect} />
     </div>
   {:else if currentNote}
-    {#key currentNote + theme}
-      <div class="editor" use:initEditor></div>
-    {/key}
-    <div class="preview">
+    <div class="editor" class:full={viewMode === 'editor'} class:hidden={viewMode === 'preview'}>
+      <div class="editor-toolbar">
+        <button on:click={() => wrapSelection('**')} title="太字"><Bold size={15} /></button>
+        <button on:click={() => wrapSelection('*')} title="斜体"><Italic size={15} /></button>
+        <button on:click={() => wrapSelection('~~')} title="取り消し線"><Strikethrough size={15} /></button>
+        <button on:click={() => wrapSelection('`')} title="インラインコード"><Code size={15} /></button>
+        <button on:click={() => prefixLines('## ')} title="見出し"><Heading2 size={15} /></button>
+        <button on:click={insertLink} title="リンク"><LinkIcon size={15} /></button>
+        <button on:click={() => prefixLines('- ')} title="箇条書き"><List size={15} /></button>
+        <button on:click={() => prefixLines('> ')} title="引用"><Quote size={15} /></button>
+      </div>
+      {#key currentNote + theme}
+        <div class="editor-mount" use:initEditor></div>
+      {/key}
+    </div>
+    <div class="preview" class:full={viewMode === 'preview'} class:hidden={viewMode === 'editor'}>
       {#if noteTags.length}
         <div class="note-tags">
           {#each noteTags as tag}
@@ -819,6 +915,29 @@
     border-color: var(--accent);
   }
 
+  .view-mode-toggle {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .view-mode-toggle button {
+    border: none;
+    border-radius: 0;
+    background: var(--bg-secondary);
+    color: var(--text-dim);
+  }
+
+  .view-mode-toggle button + button {
+    border-left: 1px solid var(--border);
+  }
+
+  .view-mode-toggle button.active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
   .breadcrumb {
     font-size: 0.8rem;
     opacity: 0.6;
@@ -929,15 +1048,54 @@
 
   .editor {
     grid-row: 2;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     min-width: 0;
   }
 
-  .editor :global(.cm-editor) {
+  .editor.full {
+    grid-column: 2 / 4;
+  }
+
+  .editor.hidden {
+    display: none;
+  }
+
+  .editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .editor-toolbar button {
+    display: flex;
+    align-items: center;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 0.3rem;
+    cursor: pointer;
+  }
+
+  .editor-toolbar button:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .editor-mount {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .editor-mount :global(.cm-editor) {
     height: 100%;
   }
 
-  .editor :global(.cm-scroller) {
+  .editor-mount :global(.cm-scroller) {
     font-family: monospace;
     font-size: 1rem;
   }
@@ -947,6 +1105,14 @@
     padding: 1rem;
     overflow-y: auto;
     border-left: 1px solid var(--border);
+  }
+
+  .preview.full {
+    grid-column: 2 / 4;
+  }
+
+  .preview.hidden {
+    display: none;
   }
 
   .preview :global(a[href^='knote:']) {
