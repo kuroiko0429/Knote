@@ -449,7 +449,12 @@
 
   async function onVaultChanged(): Promise<void> {
     await refreshList()
-    if (currentNote) {
+    if (currentNote && !notes.includes(currentNote)) {
+      currentNote = null
+      source = ''
+      html = ''
+      backlinks = []
+    } else if (currentNote) {
       backlinks = await GetBacklinks(currentNote)
     }
   }
