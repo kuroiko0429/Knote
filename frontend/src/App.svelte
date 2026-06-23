@@ -40,6 +40,7 @@
     Columns2,
     PanelLeft,
     PanelRight,
+    Settings,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -104,6 +105,8 @@
   let activeTag: string | null = null
   let noteTags: string[] = []
   let viewMode: 'split' | 'editor' | 'preview' = 'split'
+  let showSettings = false
+  let settingsCategory: 'general' | 'appearance' = 'general'
 
   function toggleTheme(): void {
     theme = theme === 'dark' ? 'light' : 'dark'
@@ -299,6 +302,10 @@
   }
 
   function onGlobalKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape' && showSettings) {
+      showSettings = false
+      return
+    }
     if (!(e.ctrlKey || e.metaKey)) return
     if (e.key === 's') {
       e.preventDefault()
@@ -655,9 +662,6 @@
           ><PanelRight size={15} /></button>
         </div>
       {/if}
-      <button on:click={toggleTheme} title="テーマ切り替え">
-        {#if theme === 'dark'}<Sun size={16} />{:else}<Moon size={16} />{/if}
-      </button>
       <button on:click={toggleGraph} title="グラフ">
         {#if showGraph}<X size={16} />{:else}<Network size={16} />{/if}
       </button>
@@ -823,11 +827,9 @@
   </div>
 
   <footer class="bottombar">
-    <div class="bottombar-left" title={vaultPath}>
-      <FolderOpen size={14} />
-      <span class="vault-path">{vaultPath}</span>
-      <button on:click={changeVault} title="保存先を変更">変更</button>
-    </div>
+    <button class="settings-trigger" title="設定" on:click={() => (showSettings = true)}>
+      <Settings size={14} />
+    </button>
     <div class="bottombar-right">
       {#if saveStatus}
         <span class="save-status"><Check size={13} /> {saveStatus}</span>
@@ -840,6 +842,44 @@
       </button>
     </div>
   </footer>
+
+  {#if showSettings}
+    <div class="modal-overlay" on:click={() => (showSettings = false)}>
+      <div class="settings-modal" on:click|stopPropagation>
+        <button class="modal-close" on:click={() => (showSettings = false)}><X size={18} /></button>
+        <div class="settings-modal-body">
+          <nav class="settings-nav">
+            <button
+              class:active={settingsCategory === 'general'}
+              on:click={() => (settingsCategory = 'general')}
+            >全般</button>
+            <button
+              class:active={settingsCategory === 'appearance'}
+              on:click={() => (settingsCategory = 'appearance')}
+            >外観</button>
+          </nav>
+          <div class="settings-content">
+            {#if settingsCategory === 'general'}
+              <h3>全般</h3>
+              <div class="settings-row">
+                <FolderOpen size={14} />
+                <span class="vault-path" title={vaultPath}>{vaultPath}</span>
+                <button on:click={changeVault}>変更</button>
+              </div>
+            {:else if settingsCategory === 'appearance'}
+              <h3>外観</h3>
+              <div class="settings-row">
+                <button class="settings-action" on:click={toggleTheme}>
+                  {#if theme === 'dark'}<Sun size={14} />{:else}<Moon size={14} />{/if}
+                  テーマ：{theme === 'dark' ? 'ダーク' : 'ライト'}
+                </button>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if contextMenu}
     <div class="context-menu" style="left:{contextMenu.x}px; top:{contextMenu.y}px">
@@ -1294,23 +1334,133 @@
     align-items: center;
   }
 
-  .bottombar-left {
+  .settings-trigger {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    min-width: 0;
-  }
-
-  .bottombar-left button {
     border: none;
     background: none;
     color: inherit;
     cursor: pointer;
     opacity: 0.7;
+    padding: 0.2rem;
   }
 
-  .bottombar-left button:hover {
+  .settings-trigger:hover {
     opacity: 1;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+  }
+
+  .settings-modal {
+    position: relative;
+    width: 640px;
+    max-width: 90vw;
+    height: 440px;
+    max-height: 80vh;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    display: flex;
+    align-items: center;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    z-index: 1;
+  }
+
+  .modal-close:hover {
+    color: var(--text);
+  }
+
+  .settings-modal-body {
+    display: flex;
+    height: 100%;
+  }
+
+  .settings-nav {
+    width: 160px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 1rem 0.5rem;
+    border-right: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+
+  .settings-nav button {
+    text-align: left;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 0.5rem 0.6rem;
+    cursor: pointer;
+  }
+
+  .settings-nav button:hover {
+    background: var(--bg-hover);
+  }
+
+  .settings-nav button.active {
+    background: var(--accent-hover);
+    color: var(--text);
+  }
+
+  .settings-content {
+    flex: 1;
+    padding: 1.5rem;
+    overflow-y: auto;
+  }
+
+  .settings-content h3 {
+    margin-top: 0;
+  }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem;
+  }
+
+  .settings-row .vault-path {
+    flex: 1;
+    max-width: none;
+  }
+
+  .settings-action {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    border: none;
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 0.4rem 0.2rem;
+  }
+
+  .settings-action:hover {
+    background: var(--bg-hover);
   }
 
   .bottombar-right {
