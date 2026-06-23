@@ -3,6 +3,7 @@ module knote-dev
 go 1.23.0
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/yuin/goldmark v1.8.2

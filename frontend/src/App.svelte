@@ -11,6 +11,7 @@
   import TreeItem from './TreeItem.svelte'
   import type { TreeNode } from './TreeItem.svelte'
   import GraphView from './GraphView.svelte'
+  import TerminalPanel from './Terminal.svelte'
   import {
     FilePlus,
     FolderPlus,
@@ -25,6 +26,7 @@
     NotebookText,
     Sun,
     Moon,
+    TerminalSquare,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -76,6 +78,12 @@
 
   $: if (typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-theme', theme)
+  }
+
+  let showTerminal = false
+
+  function toggleTerminal(): void {
+    showTerminal = !showTerminal
   }
 
   function basename(path: string): string {
@@ -583,6 +591,14 @@
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
 
+  <div class="terminal-panel" class:hidden={!showTerminal}>
+    <div class="terminal-panel-header">
+      <span><TerminalSquare size={13} /> ターミナル</span>
+      <button on:click={toggleTerminal}><X size={14} /></button>
+    </div>
+    <TerminalPanel visible={showTerminal} />
+  </div>
+
   <footer class="bottombar">
     <div class="bottombar-left" title={vaultPath}>
       <FolderOpen size={14} />
@@ -596,6 +612,9 @@
       {#if currentNote}
         <span class="char-count">{charCount}文字</span>
       {/if}
+      <button on:click={toggleTerminal} title="ターミナル" class:active={showTerminal}>
+        <TerminalSquare size={14} />
+      </button>
     </div>
   </footer>
 
@@ -626,7 +645,7 @@
   main {
     display: grid;
     grid-template-columns: 200px 1fr 1fr;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr auto auto;
     height: 100vh;
   }
 
@@ -665,7 +684,7 @@
 
   .sidebar {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 2 / 4;
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -853,13 +872,53 @@
 
   .bottombar {
     grid-column: 1 / 4;
-    grid-row: 3;
+    grid-row: 4;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0.3rem 0.8rem;
     border-top: 1px solid var(--border);
     font-size: 0.75rem;
+  }
+
+  .terminal-panel {
+    grid-column: 2 / 4;
+    grid-row: 3;
+    height: 260px;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    background: #1b2636;
+  }
+
+  .terminal-panel.hidden {
+    display: none;
+  }
+
+  .terminal-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .terminal-panel-header span {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .terminal-panel-header button {
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
   }
 
   .bottombar-left {
@@ -886,6 +945,21 @@
     align-items: center;
     gap: 0.8rem;
     opacity: 0.7;
+  }
+
+  .bottombar-right button {
+    display: flex;
+    align-items: center;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+
+  .bottombar-right button.active {
+    color: var(--accent);
+    opacity: 1;
   }
 
   .save-status {
