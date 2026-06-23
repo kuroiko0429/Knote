@@ -11,7 +11,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
@@ -23,6 +25,7 @@ type App struct {
 	ctx       context.Context
 	md        goldmark.Markdown
 	vaultPath string
+	watcher   *fsnotify.Watcher
 }
 
 type appConfig struct {
@@ -60,6 +63,56 @@ func (a *App) startup(ctx context.Context) {
 		a.vaultPath = filepath.Join(home, "Knote")
 	}
 	os.MkdirAll(a.vaultPath, 0755)
+	a.startWatcher()
+}
+
+// startWatcher watches the vault directory (recursively) for external
+// changes and notifies the frontend via a "vault:changed" event so it can
+// refresh the note list.
+func (a *App) startWatcher() {
+	if a.watcher != nil {
+		a.watcher.Close()
+	}
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	a.watcher = w
+
+	filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			w.Add(path)
+		}
+		return nil
+	})
+
+	go func() {
+		var debounce *time.Timer
+		for {
+			select {
+			case event, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				if event.Op&fsnotify.Create != 0 {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						w.Add(event.Name)
+					}
+				}
+				if debounce != nil {
+					debounce.Stop()
+				}
+				debounce = time.AfterFunc(300*time.Millisecond, func() {
+					runtime.EventsEmit(a.ctx, "vault:changed")
+				})
+			case _, ok := <-w.Errors:
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
 }
 
 func (a *App) configPath() (string, error) {
@@ -126,6 +179,7 @@ func (a *App) SelectVault() (string, error) {
 	if err := a.saveConfig(); err != nil {
 		return "", err
 	}
+	a.startWatcher()
 	return a.vaultPath, nil
 }
 

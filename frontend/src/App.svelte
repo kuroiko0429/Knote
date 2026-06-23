@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, basicSetup } from 'codemirror'
   import { EditorState } from '@codemirror/state'
   import { markdown } from '@codemirror/lang-markdown'
@@ -446,9 +447,17 @@
     await refreshList()
   }
 
+  async function onVaultChanged(): Promise<void> {
+    await refreshList()
+    if (currentNote) {
+      backlinks = await GetBacklinks(currentNote)
+    }
+  }
+
   onMount(async () => {
     vaultPath = await GetVaultPath()
     await refreshList()
+    EventsOn('vault:changed', onVaultChanged)
   })
 </script>
 
