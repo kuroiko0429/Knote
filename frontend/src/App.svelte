@@ -59,7 +59,6 @@
   let source = ''
   let html = ''
   let backlinks: string[] = []
-  let newNoteName = ''
   let saveTimer: ReturnType<typeof setTimeout>
   let renamingPath: string | null = null
   let renamingType: 'note' | 'folder' | null = null
@@ -68,7 +67,6 @@
   let searchQuery = ''
   let searchTimer: ReturnType<typeof setTimeout>
   let vaultPath = ''
-  let newNoteInputEl: HTMLInputElement
   let searchInputEl: HTMLInputElement
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
@@ -277,7 +275,7 @@
       forceSave()
     } else if (e.key === 'n') {
       e.preventDefault()
-      newNoteInputEl?.focus()
+      createNoteAt('')
     } else if (e.key === 'f') {
       e.preventDefault()
       searchInputEl?.focus()
@@ -335,15 +333,6 @@
         view.destroy()
       },
     }
-  }
-
-  async function newNote(): Promise<void> {
-    const name = newNoteName.trim()
-    if (!name) return
-    await CreateNote(name)
-    newNoteName = ''
-    await refreshList()
-    await selectNote(name)
   }
 
   function closeContextMenu(): void {
@@ -574,15 +563,6 @@
   </header>
 
   <nav class="sidebar">
-    <div class="new-note">
-      <input
-        bind:this={newNoteInputEl}
-        bind:value={newNoteName}
-        on:keydown={(e) => e.key === 'Enter' && newNote()}
-        placeholder="new note name"
-      />
-      <button on:click={newNote}><FilePlus size={16} /></button>
-    </div>
     <div class="search-box">
       <Search size={14} class="search-icon" />
       <input
@@ -824,6 +804,19 @@
   .topbar-right button {
     display: flex;
     align-items: center;
+    gap: 0.3rem;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+  }
+
+  .topbar-right button:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent);
   }
 
   .breadcrumb {
@@ -840,25 +833,9 @@
     min-height: 0;
   }
 
-  .new-note {
-    display: flex;
-    padding: 0.5rem;
-    gap: 0.25rem;
-  }
-
-  .new-note input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .new-note button {
-    display: flex;
-    align-items: center;
-  }
-
   .search-box {
     position: relative;
-    margin: 0 0.5rem 0.5rem;
+    margin: 0.5rem 0.5rem;
   }
 
   .search-box :global(.search-icon) {
@@ -873,7 +850,16 @@
   .search {
     width: 100%;
     box-sizing: border-box;
-    padding-left: 1.8rem;
+    padding: 0.4rem 0.6rem 0.4rem 1.8rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+  }
+
+  .search:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 
   .tag-chip {
