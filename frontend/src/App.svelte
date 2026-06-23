@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
   import { EditorState, EditorSelection } from '@codemirror/state'
@@ -41,6 +41,7 @@
     PanelLeft,
     PanelRight,
     Settings,
+    FileText,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -107,6 +108,58 @@
   let viewMode: 'split' | 'editor' | 'preview' = 'split'
   let showSettings = false
   let settingsCategory: 'general' | 'appearance' = 'general'
+  let showQuickSwitcher = false
+  let qsQuery = ''
+  let qsIndex = 0
+  let qsInputEl: HTMLInputElement
+
+  $: qsResults = qsQuery.trim()
+    ? notes.filter((n) => n.toLowerCase().includes(qsQuery.trim().toLowerCase()))
+    : notes
+  $: qsExactMatch = notes.includes(qsQuery.trim())
+  $: qsShowCreate = qsQuery.trim().length > 0 && !qsExactMatch
+  $: qsTotal = qsResults.length + (qsShowCreate ? 1 : 0)
+  $: if (qsIndex >= qsTotal) qsIndex = Math.max(0, qsTotal - 1)
+
+  function openQuickSwitcher(): void {
+    showQuickSwitcher = true
+    qsQuery = ''
+    qsIndex = 0
+    tick().then(() => qsInputEl?.focus())
+  }
+
+  function closeQuickSwitcher(): void {
+    showQuickSwitcher = false
+  }
+
+  async function qsSelect(path: string): Promise<void> {
+    closeQuickSwitcher()
+    if (!notes.includes(path)) {
+      await CreateNote(path)
+      await refreshList()
+    }
+    await selectNote(path)
+  }
+
+  function onQsKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      closeQuickSwitcher()
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      qsIndex = Math.min(qsIndex + 1, qsTotal - 1)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      qsIndex = Math.max(qsIndex - 1, 0)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (qsIndex < qsResults.length) {
+        qsSelect(qsResults[qsIndex])
+      } else if (qsShowCreate) {
+        qsSelect(qsQuery.trim())
+      }
+    }
+  }
 
   function toggleTheme(): void {
     theme = theme === 'dark' ? 'light' : 'dark'
@@ -306,6 +359,10 @@
       showSettings = false
       return
     }
+    if (e.key === 'Escape' && showQuickSwitcher) {
+      closeQuickSwitcher()
+      return
+    }
     if (!(e.ctrlKey || e.metaKey)) return
     if (e.key === 's') {
       e.preventDefault()
@@ -313,6 +370,9 @@
     } else if (e.key === 'n') {
       e.preventDefault()
       createNoteAt('')
+    } else if (e.key === 'p') {
+      e.preventDefault()
+      openQuickSwitcher()
     } else if (e.key === 'f') {
       e.preventDefault()
       searchInputEl?.focus()
@@ -881,6 +941,32 @@
     </div>
   {/if}
 
+  {#if showQuickSwitcher}
+    <div class="modal-overlay qs-overlay" on:click={closeQuickSwitcher}>
+      <div class="quick-switcher" on:click|stopPropagation>
+        <input
+          bind:this={qsInputEl}
+          bind:value={qsQuery}
+          on:keydown={onQsKeydown}
+          class="qs-input"
+          placeholder="ノートを開く、または新規作成..."
+        />
+        <ul class="qs-list">
+          {#each qsResults as path, i}
+            <li class:active={i === qsIndex} on:click={() => qsSelect(path)}>
+              <FileText size={14} />{path}
+            </li>
+          {/each}
+          {#if qsShowCreate}
+            <li class:active={qsIndex === qsResults.length} on:click={() => qsSelect(qsQuery.trim())}>
+              <FilePlus size={14} />新規ノートを作成: "{qsQuery.trim()}"
+            </li>
+          {/if}
+        </ul>
+      </div>
+    </div>
+  {/if}
+
   {#if contextMenu}
     <div class="context-menu" style="left:{contextMenu.x}px; top:{contextMenu.y}px">
       {#if contextMenu.type === 'empty'}
@@ -1357,6 +1443,57 @@
     align-items: center;
     justify-content: center;
     z-index: 20;
+  }
+
+  .qs-overlay {
+    align-items: flex-start;
+    padding-top: 12vh;
+  }
+
+  .quick-switcher {
+    width: 560px;
+    max-width: 90vw;
+    max-height: 60vh;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .qs-input {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    color: var(--text);
+    padding: 0.8rem 1rem;
+    font-size: 1rem;
+  }
+
+  .qs-input:focus {
+    outline: none;
+  }
+
+  .qs-list {
+    list-style: none;
+    margin: 0;
+    padding: 0.3rem;
+    overflow-y: auto;
+  }
+
+  .qs-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .qs-list li.active {
+    background: var(--accent-hover);
   }
 
   .settings-modal {
