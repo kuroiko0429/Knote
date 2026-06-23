@@ -42,6 +42,7 @@
     PanelRight,
     Settings,
     FileText,
+    AlignLeft,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -336,6 +337,31 @@
 
   async function render(): Promise<void> {
     html = await RenderMarkdown(source)
+    await updateOutline()
+  }
+
+  interface OutlineItem {
+    level: number
+    text: string
+    el: HTMLElement
+  }
+
+  let outline: OutlineItem[] = []
+  let showOutline = false
+  let previewContentEl: HTMLDivElement
+
+  async function updateOutline(): Promise<void> {
+    await tick()
+    if (!previewContentEl) {
+      outline = []
+      return
+    }
+    const headings = Array.from(previewContentEl.querySelectorAll('h1, h2, h3, h4, h5, h6')) as HTMLElement[]
+    outline = headings.map((el) => ({ level: Number(el.tagName[1]), text: el.textContent || '', el }))
+  }
+
+  function jumpToHeading(item: OutlineItem): void {
+    item.el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   function onEdit(): void {
@@ -553,6 +579,7 @@
       html = ''
       backlinks = []
       noteTags = []
+      outline = []
     }
     await refreshList()
   }
@@ -678,6 +705,7 @@
       html = ''
       backlinks = []
       noteTags = []
+      outline = []
     } else if (currentNote) {
       backlinks = await GetBacklinks(currentNote)
       noteTags = await GetTags(currentNote)
@@ -721,6 +749,11 @@
             title="プレビューのみ"
           ><PanelRight size={15} /></button>
         </div>
+      {/if}
+      {#if currentNote && !showGraph && viewMode !== 'editor'}
+        <button on:click={() => (showOutline = !showOutline)} title="アウトライン" class:active={showOutline}>
+          <AlignLeft size={16} />
+        </button>
       {/if}
       <button on:click={toggleGraph} title="グラフ">
         {#if showGraph}<X size={16} />{:else}<Network size={16} />{/if}
@@ -853,7 +886,7 @@
           {/each}
         </div>
       {/if}
-      <div on:click={onPreviewClick}>{@html html}</div>
+      <div bind:this={previewContentEl} on:click={onPreviewClick}>{@html html}</div>
       {#if backlinks.length}
         <div class="backlinks">
           <div class="backlinks-title"><Link2 size={13} /> バックリンク</div>
@@ -865,6 +898,18 @@
         </div>
       {/if}
     </div>
+    {#if showOutline && outline.length}
+      <div class="outline-panel">
+        <div class="outline-title"><AlignLeft size={13} /> アウトライン</div>
+        <ul>
+          {#each outline as item}
+            <li style="padding-left: {(item.level - 1) * 0.8}rem">
+              <span on:click={() => jumpToHeading(item)}>{item.text}</span>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
@@ -1066,6 +1111,12 @@
   .topbar-right button:hover {
     background: var(--accent-hover);
     border-color: var(--accent);
+  }
+
+  .topbar-right button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
   }
 
   .view-mode-toggle {
@@ -1297,6 +1348,54 @@
 
   .preview.hidden {
     display: none;
+  }
+
+  .outline-panel {
+    position: fixed;
+    top: calc(2.5rem + 1px);
+    right: 0.6rem;
+    width: 220px;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    padding: 0.5rem;
+    z-index: 8;
+  }
+
+  .outline-title {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    opacity: 0.6;
+    margin-bottom: 0.4rem;
+  }
+
+  .outline-panel ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .outline-panel li {
+    padding: 0.2rem 0;
+  }
+
+  .outline-panel li span {
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .outline-panel li span:hover {
+    color: var(--accent);
   }
 
   .preview :global(a[href^='knote:']) {
