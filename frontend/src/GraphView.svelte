@@ -144,18 +144,18 @@
   }
 
   .edge {
-    stroke: #555;
+    stroke: var(--border);
     stroke-width: 1;
   }
 
   .node circle {
-    fill: #7c9eff;
+    fill: var(--accent);
     cursor: pointer;
   }
 
   .node.phantom circle {
     fill: none;
-    stroke: #7c9eff;
+    stroke: var(--accent);
     stroke-width: 1;
     stroke-dasharray: 3 2;
   }
@@ -165,7 +165,7 @@
   }
 
   .node text {
-    fill: #ccc;
+    fill: var(--text);
     font-size: 0.7rem;
     text-anchor: middle;
     pointer-events: none;

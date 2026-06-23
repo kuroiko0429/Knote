@@ -165,12 +165,12 @@
   }
 
   .tree-row.active {
-    background: rgba(128, 128, 128, 0.2);
+    background: var(--bg-hover);
   }
 
   .tree-row.drag-over {
-    background: rgba(124, 158, 255, 0.25);
-    outline: 1px dashed #7c9eff;
+    background: var(--accent-hover);
+    outline: 1px dashed var(--accent);
     outline-offset: -1px;
   }
 

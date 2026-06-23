@@ -22,6 +22,8 @@
     Link2,
     X,
     NotebookText,
+    Sun,
+    Moon,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -64,6 +66,16 @@
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
+  let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
+
+  function toggleTheme(): void {
+    theme = theme === 'dark' ? 'light' : 'dark'
+    localStorage.setItem('knote-theme', theme)
+  }
+
+  $: if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('data-theme', theme)
+  }
 
   function basename(path: string): string {
     const i = path.lastIndexOf('/')
@@ -212,9 +224,9 @@
     { tag: tags.strong, fontWeight: 'bold' },
     { tag: tags.emphasis, fontStyle: 'italic' },
     { tag: tags.strikethrough, textDecoration: 'line-through' },
-    { tag: tags.monospace, fontFamily: 'monospace', backgroundColor: 'rgba(255, 255, 255, 0.08)' },
-    { tag: tags.link, color: '#7c9eff' },
-    { tag: tags.url, color: '#7c9eff', textDecoration: 'underline' },
+    { tag: tags.monospace, fontFamily: 'monospace', backgroundColor: 'var(--code-bg)' },
+    { tag: tags.link, color: 'var(--accent)' },
+    { tag: tags.url, color: 'var(--accent)', textDecoration: 'underline' },
     { tag: tags.quote, fontStyle: 'italic', opacity: '0.8' },
     { tag: tags.processingInstruction, opacity: '0.4' },
   ])
@@ -226,7 +238,7 @@
         extensions: [
           basicSetup,
           markdown({ codeLanguages: languages }),
-          oneDark,
+          ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
@@ -447,6 +459,9 @@
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
       {#if breadcrumb}<span class="breadcrumb">{breadcrumb}</span>{/if}
+      <button on:click={toggleTheme} title="テーマ切り替え">
+        {#if theme === 'dark'}<Sun size={16} />{:else}<Moon size={16} />{/if}
+      </button>
       <button on:click={toggleGraph} title="グラフ">
         {#if showGraph}<X size={16} />{:else}<Network size={16} />{/if}
       </button>
@@ -534,7 +549,7 @@
       <GraphView {notes} edges={graphEdges} {currentNote} on:select={onGraphSelect} />
     </div>
   {:else if currentNote}
-    {#key currentNote}
+    {#key currentNote + theme}
       <div class="editor" use:initEditor></div>
     {/key}
     <div class="preview">
@@ -608,7 +623,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.4rem 0.8rem;
-    border-bottom: 1px solid #ccc;
+    border-bottom: 1px solid var(--border);
   }
 
   .app-title {
@@ -637,7 +652,7 @@
   .sidebar {
     grid-column: 1;
     grid-row: 2;
-    border-right: 1px solid #ccc;
+    border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -704,7 +719,7 @@
   }
 
   li.active {
-    background: rgba(128, 128, 128, 0.2);
+    background: var(--bg-hover);
   }
 
   .note-name {
@@ -749,11 +764,11 @@
     grid-row: 2;
     padding: 1rem;
     overflow-y: auto;
-    border-left: 1px solid #ccc;
+    border-left: 1px solid var(--border);
   }
 
   .preview :global(a[href^='knote:']) {
-    color: #7c9eff;
+    color: var(--accent);
     text-decoration: none;
     cursor: pointer;
   }
@@ -769,18 +784,18 @@
 
   .preview :global(th),
   .preview :global(td) {
-    border: 1px solid #444;
+    border: 1px solid var(--border);
     padding: 0.4rem 0.7rem;
   }
 
   .preview :global(th) {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--code-bg);
   }
 
   .backlinks {
     margin-top: 2rem;
     padding-top: 1rem;
-    border-top: 1px solid #444;
+    border-top: 1px solid var(--border);
   }
 
   .backlinks-title {
@@ -803,7 +818,7 @@
   }
 
   .backlinks .note-name {
-    color: #7c9eff;
+    color: var(--accent);
   }
 
   .empty {
@@ -829,7 +844,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.3rem 0.8rem;
-    border-top: 1px solid #ccc;
+    border-top: 1px solid var(--border);
     font-size: 0.75rem;
   }
 
@@ -863,15 +878,15 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    color: #7c9eff;
+    color: var(--accent);
   }
 
   .context-menu {
     position: fixed;
     display: flex;
     flex-direction: column;
-    background: #2a3548;
-    border: 1px solid #444;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
     overflow: hidden;
@@ -892,6 +907,6 @@
   }
 
   .context-menu button:hover {
-    background: rgba(124, 158, 255, 0.2);
+    background: var(--accent-hover);
   }
 </style>
