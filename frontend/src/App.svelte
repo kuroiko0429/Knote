@@ -3,6 +3,7 @@
   import { EditorView, basicSetup } from 'codemirror'
   import { EditorState } from '@codemirror/state'
   import { markdown } from '@codemirror/lang-markdown'
+  import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
   import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
   import { tags } from '@lezer/highlight'
@@ -114,8 +115,15 @@
 
   $: tree = buildTree(folders, notes)
   $: isSearching = searchQuery.trim().length > 0
-  $: charCount = currentNote ? source.length : 0
   $: breadcrumb = currentNote ? currentNote.split('/').join(' / ') : ''
+
+  function countChars(htmlStr: string): number {
+    const div = document.createElement('div')
+    div.innerHTML = htmlStr
+    return (div.textContent || '').replace(/\s/g, '').length
+  }
+
+  $: charCount = currentNote ? countChars(html) : 0
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -217,7 +225,7 @@
         doc: source,
         extensions: [
           basicSetup,
-          markdown(),
+          markdown({ codeLanguages: languages }),
           oneDark,
           syntaxHighlighting(livePreviewStyle),
           EditorView.updateListener.of((update) => {
@@ -366,6 +374,42 @@
     }
   }
 
+  async function moveTo(targetFolder: string, e: DragEvent): Promise<void> {
+    e.preventDefault()
+    e.stopPropagation()
+    const data = e.dataTransfer?.getData('text/plain')
+    if (!data) return
+    const { path, type } = JSON.parse(data) as { path: string; type: 'note' | 'folder' }
+
+    const newPath = targetFolder ? `${targetFolder}/${basename(path)}` : basename(path)
+    if (newPath === path) return
+    if (type === 'folder' && (targetFolder === path || targetFolder.startsWith(path + '/'))) return
+
+    if (type === 'folder') {
+      await RenameFolder(path, newPath)
+      if (expanded.has(path)) {
+        const next = new Set(expanded)
+        next.delete(path)
+        next.add(newPath)
+        expanded = next
+      }
+    } else {
+      await RenameNote(path, newPath)
+      if (currentNote === path) currentNote = newPath
+    }
+
+    if (targetFolder && !expanded.has(targetFolder)) {
+      expanded = new Set(expanded).add(targetFolder)
+    }
+
+    await refreshList()
+    if (currentNote) {
+      source = await ReadNote(currentNote)
+      await render()
+      backlinks = await GetBacklinks(currentNote)
+    }
+  }
+
   async function onPreviewClick(e: MouseEvent): Promise<void> {
     const target = (e.target as HTMLElement).closest('a')
     if (!target) return
@@ -429,7 +473,11 @@
         placeholder="search"
       />
     </div>
-    <ul on:contextmenu={onSidebarContextMenu}>
+    <ul
+      on:contextmenu={onSidebarContextMenu}
+      on:dragover={(e) => e.preventDefault()}
+      on:drop={(e) => moveTo('', e)}
+    >
       {#if isSearching}
         {#each visibleNotes as path}
           <li class:active={path === currentNote} on:contextmenu={(e) => onNoteContextMenu(e, path)}>
@@ -473,6 +521,7 @@
             onNoteContext={onNoteContextMenu}
             onFolderContext={onFolderContextMenu}
             onDeleteNote={deleteNote}
+            onDrop={moveTo}
             focusInputAction={focusInput}
           />
         {/each}

@@ -23,15 +23,47 @@
   export let onNoteContext: (e: MouseEvent, path: string) => void
   export let onFolderContext: (e: MouseEvent, path: string) => void
   export let onDeleteNote: (path: string) => void
+  export let onDrop: (targetFolder: string, e: DragEvent) => void
   export let focusInputAction: (el: HTMLInputElement) => void
 
   $: indent = `${depth * 0.9}rem`
+
+  let dragDepth = 0
+  $: dragOver = dragDepth > 0
+
+  function onDragStart(e: DragEvent): void {
+    e.dataTransfer?.setData('text/plain', JSON.stringify({ path: node.path, type: node.type }))
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  }
+
+  function onDragEnter(): void {
+    dragDepth++
+  }
+
+  function onDragLeave(): void {
+    dragDepth = Math.max(0, dragDepth - 1)
+  }
+
+  function parentOf(path: string): string {
+    const i = path.lastIndexOf('/')
+    return i === -1 ? '' : path.slice(0, i)
+  }
 </script>
 
 {#if node.type === 'folder'}
   <li
     class="tree-row folder"
+    class:drag-over={dragOver}
     style="padding-left:{indent}"
+    draggable="true"
+    on:dragstart={onDragStart}
+    on:dragover={(e) => e.preventDefault()}
+    on:dragenter={onDragEnter}
+    on:dragleave={onDragLeave}
+    on:drop={(e) => {
+      dragDepth = 0
+      onDrop(node.path, e)
+    }}
     on:contextmenu={(e) => onFolderContext(e, node.path)}
   >
     {#if renamingPath === node.path && renamingType === 'folder'}
@@ -72,6 +104,7 @@
         {onNoteContext}
         {onFolderContext}
         {onDeleteNote}
+        {onDrop}
         {focusInputAction}
       />
     {/each}
@@ -80,7 +113,17 @@
   <li
     class="tree-row"
     class:active={node.path === currentNote}
+    class:drag-over={dragOver}
     style="padding-left:{indent}"
+    draggable="true"
+    on:dragstart={onDragStart}
+    on:dragover={(e) => e.preventDefault()}
+    on:dragenter={onDragEnter}
+    on:dragleave={onDragLeave}
+    on:drop={(e) => {
+      dragDepth = 0
+      onDrop(parentOf(node.path), e)
+    }}
     on:contextmenu={(e) => onNoteContext(e, node.path)}
   >
     {#if renamingPath === node.path && renamingType === 'note'}
@@ -123,6 +166,12 @@
 
   .tree-row.active {
     background: rgba(128, 128, 128, 0.2);
+  }
+
+  .tree-row.drag-over {
+    background: rgba(124, 158, 255, 0.25);
+    outline: 1px dashed #7c9eff;
+    outline-offset: -1px;
   }
 
   .folder-name,

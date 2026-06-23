@@ -14,6 +14,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/yuin/goldmark"
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
 )
 
 // App struct
@@ -31,7 +32,14 @@ var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{md: goldmark.New()}
+	md := goldmark.New(
+		goldmark.WithExtensions(
+			highlighting.NewHighlighting(
+				highlighting.WithStyle("onedark"),
+			),
+		),
+	)
+	return &App{md: md}
 }
 
 // startup is called when the app starts. The context is saved
