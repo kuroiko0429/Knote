@@ -33,6 +33,11 @@
   let simulation: Simulation<Node, undefined> | null = null
   let dragNode: Node | null = null
 
+  let vb = { x: 0, y: 0, w: 600, h: 600 }
+  let vbInitialized = false
+  let panning = false
+  let panStart = { x: 0, y: 0, vbX: 0, vbY: 0 }
+
   function rebuild(noteList: string[], edgeList: { source: string; target: string }[]): void {
     const known = new Set(noteList)
     const ids = new Set<string>(noteList)
@@ -72,6 +77,10 @@
   $: if (container) {
     width = container.clientWidth || width
     height = container.clientHeight || height
+    if (!vbInitialized) {
+      vb = { x: 0, y: 0, w: width, h: height }
+      vbInitialized = true
+    }
     rebuild(notes, edges)
   }
 
@@ -85,19 +94,59 @@
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
   }
 
+  function onBgPointerDown(e: PointerEvent): void {
+    panning = true
+    panStart = { x: e.clientX, y: e.clientY, vbX: vb.x, vbY: vb.y }
+    ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+  }
+
   function onPointerMove(e: PointerEvent): void {
-    if (!dragNode || !container) return
-    const rect = container.getBoundingClientRect()
-    dragNode.fx = e.clientX - rect.left
-    dragNode.fy = e.clientY - rect.top
+    if (dragNode && container) {
+      const rect = container.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      dragNode.fx = vb.x + (mx / width) * vb.w
+      dragNode.fy = vb.y + (my / height) * vb.h
+      return
+    }
+    if (panning) {
+      const dxPix = e.clientX - panStart.x
+      const dyPix = e.clientY - panStart.y
+      vb = {
+        ...vb,
+        x: panStart.vbX - (dxPix / width) * vb.w,
+        y: panStart.vbY - (dyPix / height) * vb.h,
+      }
+    }
   }
 
   function onPointerUp(): void {
-    if (!dragNode) return
-    dragNode.fx = null
-    dragNode.fy = null
-    simulation?.alphaTarget(0)
-    dragNode = null
+    if (dragNode) {
+      dragNode.fx = null
+      dragNode.fy = null
+      simulation?.alphaTarget(0)
+      dragNode = null
+    }
+    panning = false
+  }
+
+  function onWheel(e: WheelEvent): void {
+    e.preventDefault()
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const scale = e.deltaY < 0 ? 0.9 : 1.1
+    const vx = vb.x + (mx / width) * vb.w
+    const vy = vb.y + (my / height) * vb.h
+    const newW = Math.max(80, Math.min(8000, vb.w * scale))
+    const newH = Math.max(80, Math.min(8000, vb.h * scale))
+    vb = {
+      x: vx - (mx / width) * newW,
+      y: vy - (my / height) * newH,
+      w: newW,
+      h: newH,
+    }
   }
 
   function labelOf(id: string): string {
@@ -110,10 +159,21 @@
   <svg
     {width}
     {height}
+    viewBox="{vb.x} {vb.y} {vb.w} {vb.h}"
+    on:wheel={onWheel}
     on:pointermove={onPointerMove}
     on:pointerup={onPointerUp}
     on:pointerleave={onPointerUp}
   >
+    <rect
+      x={vb.x}
+      y={vb.y}
+      width={vb.w}
+      height={vb.h}
+      fill="transparent"
+      class="graph-bg"
+      on:pointerdown={onBgPointerDown}
+    />
     {#each links as link}
       <line x1={link.source.x} y1={link.source.y} x2={link.target.x} y2={link.target.y} class="edge" />
     {/each}
@@ -141,6 +201,10 @@
 
   svg {
     display: block;
+  }
+
+  .graph-bg {
+    cursor: grab;
   }
 
   .edge {
