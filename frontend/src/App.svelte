@@ -4,8 +4,24 @@
   import { EditorState } from '@codemirror/state'
   import { markdown } from '@codemirror/lang-markdown'
   import { oneDark } from '@codemirror/theme-one-dark'
+  import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+  import { tags } from '@lezer/highlight'
   import TreeItem from './TreeItem.svelte'
   import type { TreeNode } from './TreeItem.svelte'
+  import GraphView from './GraphView.svelte'
+  import {
+    FilePlus,
+    FolderPlus,
+    Search,
+    Network,
+    FolderOpen,
+    Check,
+    Pencil,
+    Trash2,
+    Link2,
+    X,
+    NotebookText,
+  } from 'lucide-svelte'
   import {
     RenderMarkdown,
     ListNotes,
@@ -21,11 +37,14 @@
     GetVaultPath,
     SelectVault,
     GetBacklinks,
+    GetGraph,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
   let folders: string[] = []
   let visibleNotes: string[] = []
+  let showGraph = false
+  let graphEdges: { source: string; target: string }[] = []
   let currentNote: string | null = null
   let source = ''
   let html = ''
@@ -95,6 +114,8 @@
 
   $: tree = buildTree(folders, notes)
   $: isSearching = searchQuery.trim().length > 0
+  $: charCount = currentNote ? source.length : 0
+  $: breadcrumb = currentNote ? currentNote.split('/').join(' / ') : ''
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -105,6 +126,22 @@
     notes = await ListNotes()
     folders = await ListFolders()
     await runSearch()
+    if (showGraph) graphEdges = (await GetGraph()).edges
+  }
+
+  async function toggleGraph(): Promise<void> {
+    showGraph = !showGraph
+    if (showGraph) graphEdges = (await GetGraph()).edges
+  }
+
+  async function onGraphSelect(e: CustomEvent<string>): Promise<void> {
+    const name = e.detail
+    showGraph = false
+    if (!notes.includes(name)) {
+      await CreateNote(name)
+      await refreshList()
+    }
+    await selectNote(name)
   }
 
   async function runSearch(): Promise<void> {
@@ -157,6 +194,23 @@
     }
   }
 
+  const livePreviewStyle = HighlightStyle.define([
+    { tag: tags.heading1, fontSize: '1.6em', fontWeight: 'bold' },
+    { tag: tags.heading2, fontSize: '1.4em', fontWeight: 'bold' },
+    { tag: tags.heading3, fontSize: '1.25em', fontWeight: 'bold' },
+    { tag: tags.heading4, fontSize: '1.1em', fontWeight: 'bold' },
+    { tag: tags.heading5, fontWeight: 'bold' },
+    { tag: tags.heading6, fontWeight: 'bold', opacity: '0.85' },
+    { tag: tags.strong, fontWeight: 'bold' },
+    { tag: tags.emphasis, fontStyle: 'italic' },
+    { tag: tags.strikethrough, textDecoration: 'line-through' },
+    { tag: tags.monospace, fontFamily: 'monospace', backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+    { tag: tags.link, color: '#7c9eff' },
+    { tag: tags.url, color: '#7c9eff', textDecoration: 'underline' },
+    { tag: tags.quote, fontStyle: 'italic', opacity: '0.8' },
+    { tag: tags.processingInstruction, opacity: '0.4' },
+  ])
+
   function initEditor(el: HTMLDivElement): { destroy(): void } {
     const view = new EditorView({
       state: EditorState.create({
@@ -165,6 +219,7 @@
           basicSetup,
           markdown(),
           oneDark,
+          syntaxHighlighting(livePreviewStyle),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               source = update.state.doc.toString()
@@ -344,6 +399,16 @@
 <svelte:window on:keydown={onGlobalKeydown} on:click={closeContextMenu} />
 
 <main>
+  <header class="topbar">
+    <span class="app-title"><NotebookText size={16} /> Knote</span>
+    <div class="topbar-right">
+      {#if breadcrumb}<span class="breadcrumb">{breadcrumb}</span>{/if}
+      <button on:click={toggleGraph} title="グラフ">
+        {#if showGraph}<X size={16} />{:else}<Network size={16} />{/if}
+      </button>
+    </div>
+  </header>
+
   <nav class="sidebar">
     <div class="new-note">
       <input
@@ -352,15 +417,18 @@
         on:keydown={(e) => e.key === 'Enter' && newNote()}
         placeholder="new note name"
       />
-      <button on:click={newNote}>+</button>
+      <button on:click={newNote}><FilePlus size={16} /></button>
     </div>
-    <input
-      bind:this={searchInputEl}
-      class="search"
-      bind:value={searchQuery}
-      on:input={onSearchInput}
-      placeholder="search"
-    />
+    <div class="search-box">
+      <Search size={14} class="search-icon" />
+      <input
+        bind:this={searchInputEl}
+        class="search"
+        bind:value={searchQuery}
+        on:input={onSearchInput}
+        placeholder="search"
+      />
+    </div>
     <ul on:contextmenu={onSidebarContextMenu}>
       {#if isSearching}
         {#each visibleNotes as path}
@@ -383,7 +451,7 @@
                 on:dblclick={() => startRename(path)}
               >{path}</span>
             {/if}
-            <button class="delete" on:click={() => deleteNote(path)}>×</button>
+            <button class="delete" on:click={() => deleteNote(path)}><Trash2 size={14} /></button>
           </li>
         {/each}
       {:else}
@@ -410,13 +478,13 @@
         {/each}
       {/if}
     </ul>
-    <div class="vault" title={vaultPath}>
-      <span class="vault-path">{vaultPath}</span>
-      <button on:click={changeVault}>変更</button>
-    </div>
   </nav>
 
-  {#if currentNote}
+  {#if showGraph}
+    <div class="graph-view">
+      <GraphView {notes} edges={graphEdges} {currentNote} on:select={onGraphSelect} />
+    </div>
+  {:else if currentNote}
     {#key currentNote}
       <div class="editor" use:initEditor></div>
     {/key}
@@ -424,7 +492,7 @@
       <div on:click={onPreviewClick}>{@html html}</div>
       {#if backlinks.length}
         <div class="backlinks">
-          <div class="backlinks-title">バックリンク</div>
+          <div class="backlinks-title"><Link2 size={13} /> バックリンク</div>
           <ul>
             {#each backlinks as name}
               <li><span class="note-name" on:click={() => selectNote(name)}>{name}</span></li>
@@ -437,24 +505,36 @@
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
 
-  {#if saveStatus}
-    <div class="save-toast">{saveStatus}</div>
-  {/if}
+  <footer class="bottombar">
+    <div class="bottombar-left" title={vaultPath}>
+      <FolderOpen size={14} />
+      <span class="vault-path">{vaultPath}</span>
+      <button on:click={changeVault} title="保存先を変更">変更</button>
+    </div>
+    <div class="bottombar-right">
+      {#if saveStatus}
+        <span class="save-status"><Check size={13} /> {saveStatus}</span>
+      {/if}
+      {#if currentNote}
+        <span class="char-count">{charCount}文字</span>
+      {/if}
+    </div>
+  </footer>
 
   {#if contextMenu}
     <div class="context-menu" style="left:{contextMenu.x}px; top:{contextMenu.y}px">
       {#if contextMenu.type === 'empty'}
-        <button on:click={() => createNoteAt('')}>新規ノート</button>
-        <button on:click={createFolderViaMenu}>新規フォルダ</button>
+        <button on:click={() => createNoteAt('')}><FilePlus size={14} /> 新規ノート</button>
+        <button on:click={createFolderViaMenu}><FolderPlus size={14} /> 新規フォルダ</button>
       {:else if contextMenu.type === 'note' && contextMenu.path}
         {@const path = contextMenu.path}
-        <button on:click={() => createNoteAt(dirname(path))}>新規ノート</button>
-        <button on:click={() => { closeContextMenu(); startRename(path) }}>名前を変更</button>
-        <button on:click={() => { closeContextMenu(); deleteNote(path) }}>削除</button>
+        <button on:click={() => createNoteAt(dirname(path))}><FilePlus size={14} /> 新規ノート</button>
+        <button on:click={() => { closeContextMenu(); startRename(path) }}><Pencil size={14} /> 名前を変更</button>
+        <button on:click={() => { closeContextMenu(); deleteNote(path) }}><Trash2 size={14} /> 削除</button>
       {:else if contextMenu.type === 'folder' && contextMenu.path}
         {@const path = contextMenu.path}
-        <button on:click={() => createNoteAt(path)}>新規ノート</button>
-        <button on:click={() => { closeContextMenu(); startRenameFolder(path) }}>名前を変更</button>
+        <button on:click={() => createNoteAt(path)}><FilePlus size={14} /> 新規ノート</button>
+        <button on:click={() => { closeContextMenu(); startRenameFolder(path) }}><Pencil size={14} /> 名前を変更</button>
       {/if}
     </div>
   {/if}
@@ -468,10 +548,46 @@
   main {
     display: grid;
     grid-template-columns: 200px 1fr 1fr;
+    grid-template-rows: auto 1fr auto;
     height: 100vh;
   }
 
+  .topbar {
+    grid-column: 1 / 4;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.8rem;
+    border-bottom: 1px solid #ccc;
+  }
+
+  .app-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: bold;
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .topbar-right button {
+    display: flex;
+    align-items: center;
+  }
+
+  .breadcrumb {
+    font-size: 0.8rem;
+    opacity: 0.6;
+  }
+
   .sidebar {
+    grid-column: 1;
+    grid-row: 2;
     border-right: 1px solid #ccc;
     display: flex;
     flex-direction: column;
@@ -489,8 +605,29 @@
     min-width: 0;
   }
 
-  .search {
+  .new-note button {
+    display: flex;
+    align-items: center;
+  }
+
+  .search-box {
+    position: relative;
     margin: 0 0.5rem 0.5rem;
+  }
+
+  .search-box :global(.search-icon) {
+    position: absolute;
+    left: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .search {
+    width: 100%;
+    box-sizing: border-box;
+    padding-left: 1.8rem;
   }
 
   ul {
@@ -501,17 +638,8 @@
     overflow-y: auto;
   }
 
-  .vault {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.4rem 0.6rem;
-    border-top: 1px solid #ccc;
-    font-size: 0.75rem;
-  }
-
   .vault-path {
-    flex: 1;
+    max-width: 40vw;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -554,6 +682,7 @@
   }
 
   .editor {
+    grid-row: 2;
     overflow: hidden;
     min-width: 0;
   }
@@ -568,6 +697,7 @@
   }
 
   .preview {
+    grid-row: 2;
     padding: 1rem;
     overflow-y: auto;
     border-left: 1px solid #ccc;
@@ -590,6 +720,9 @@
   }
 
   .backlinks-title {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
     font-size: 0.75rem;
     opacity: 0.6;
     margin-bottom: 0.4rem;
@@ -611,21 +744,62 @@
 
   .empty {
     grid-column: 2 / 4;
+    grid-row: 2;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 0.5;
   }
 
-  .save-toast {
-    position: fixed;
-    top: 0.75rem;
-    right: 0.75rem;
-    background: rgba(124, 158, 255, 0.9);
-    color: #1b2636;
-    padding: 0.3rem 0.7rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
+  .graph-view {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .bottombar {
+    grid-column: 1 / 4;
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3rem 0.8rem;
+    border-top: 1px solid #ccc;
+    font-size: 0.75rem;
+  }
+
+  .bottombar-left {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+
+  .bottombar-left button {
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.7;
+  }
+
+  .bottombar-left button:hover {
+    opacity: 1;
+  }
+
+  .bottombar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    opacity: 0.7;
+  }
+
+  .save-status {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: #7c9eff;
   }
 
   .context-menu {
@@ -641,6 +815,9 @@
   }
 
   .context-menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     border: none;
     background: none;
     color: inherit;

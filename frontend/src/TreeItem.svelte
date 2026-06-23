@@ -5,6 +5,8 @@
 </script>
 
 <script lang="ts">
+  import { ChevronRight, ChevronDown, Folder, FolderOpen, FileText, Trash2 } from 'lucide-svelte'
+
   export let node: TreeNode
   export let depth: number
   export let currentNote: string | null
@@ -45,7 +47,9 @@
       />
     {:else}
       <span class="folder-name" on:click={() => onToggle(node.path)}>
-        {expanded.has(node.path) ? '▾' : '▸'} {node.name}
+        <svelte:component this={expanded.has(node.path) ? ChevronDown : ChevronRight} size={14} class="chevron" />
+        <svelte:component this={expanded.has(node.path) ? FolderOpen : Folder} size={15} />
+        {node.name}
       </span>
     {/if}
   </li>
@@ -95,9 +99,14 @@
         class="note-name"
         on:click={() => onSelect(node.path)}
         on:dblclick={() => onRenameStartNote(node.path)}
-      >{node.name}</span>
+      >
+        <FileText size={14} />
+        {node.name}
+      </span>
     {/if}
-    <button class="delete" on:click={() => onDeleteNote(node.path)}>×</button>
+    <button class="delete" on:click={() => onDeleteNote(node.path)}>
+      <Trash2 size={14} />
+    </button>
   </li>
 {/if}
 
@@ -118,10 +127,24 @@
 
   .folder-name,
   .note-name {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .folder-name :global(.chevron) {
+    flex-shrink: 0;
+    opacity: 0.6;
+  }
+
+  .folder-name :global(svg),
+  .note-name :global(svg) {
+    flex-shrink: 0;
+    opacity: 0.7;
   }
 
   .rename-input {

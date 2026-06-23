@@ -264,6 +264,43 @@ func (a *App) GetBacklinks(name string) ([]string, error) {
 	return names, nil
 }
 
+// GraphEdge is a single [[wikilink]] reference from one note to another
+type GraphEdge struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+}
+
+// GraphData is the full set of notes and the wikilinks between them
+type GraphData struct {
+	Nodes []string    `json:"nodes"`
+	Edges []GraphEdge `json:"edges"`
+}
+
+// GetGraph returns every note and every [[wikilink]] reference between them
+func (a *App) GetGraph() (GraphData, error) {
+	nodes, err := a.ListNotes()
+	if err != nil {
+		return GraphData{}, err
+	}
+
+	edges := []GraphEdge{}
+	err = a.walkNotes(func(relPath string) error {
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
+		if err != nil {
+			return nil
+		}
+		for _, m := range wikilinkPattern.FindAllStringSubmatch(string(data), -1) {
+			edges = append(edges, GraphEdge{Source: relPath, Target: m[1]})
+		}
+		return nil
+	})
+	if err != nil {
+		return GraphData{}, err
+	}
+
+	return GraphData{Nodes: nodes, Edges: edges}, nil
+}
+
 // ReadNote returns the content of the given note
 func (a *App) ReadNote(name string) (string, error) {
 	data, err := os.ReadFile(a.notePath(name))
