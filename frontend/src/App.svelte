@@ -3,7 +3,7 @@
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
   import { EditorState, EditorSelection } from '@codemirror/state'
-  import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
+  import { history, defaultKeymap, historyKeymap, undo, redo } from '@codemirror/commands'
   import { markdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
@@ -43,6 +43,15 @@
     Settings,
     FileText,
     AlignLeft,
+    Image,
+    Underline,
+    Code2,
+    ListOrdered,
+    ListChecks,
+    Minus,
+    Table,
+    Undo2,
+    Redo2,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -62,6 +71,8 @@
     GetGraph,
     GetTags,
     SearchByTag,
+    SaveImage,
+    SelectImage,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -424,6 +435,34 @@
 
   let editorView: EditorView | null = null
 
+  async function handleImageFile(file: File, view: EditorView, pos: number): Promise<void> {
+    const reader = new FileReader()
+    const base64 = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '')
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+    const relPath = await SaveImage(file.name, base64)
+    const insert = `![](${relPath})`
+    view.dispatch({
+      changes: { from: pos, insert },
+      selection: { anchor: pos + insert.length },
+    })
+  }
+
+  async function insertImageFromFile(): Promise<void> {
+    if (!editorView) return
+    const view = editorView
+    const pos = view.state.selection.main.from
+    const relPath = await SelectImage()
+    if (!relPath) return
+    const insert = `![](${relPath})`
+    view.dispatch({
+      changes: { from: pos, insert },
+      selection: { anchor: pos + insert.length },
+    })
+  }
+
   function initEditor(el: HTMLDivElement): { destroy(): void } {
     const view = new EditorView({
       state: EditorState.create({
@@ -443,6 +482,30 @@
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
+          EditorView.domEventHandlers({
+            paste(event, view) {
+              const item = Array.from(event.clipboardData?.items ?? []).find((i) => i.type.startsWith('image/'))
+              const file = item?.getAsFile()
+                ?? Array.from(event.clipboardData?.files ?? []).find((f) => f.type.startsWith('image/'))
+              if (!file) return false
+              event.preventDefault()
+              handleImageFile(file, view, view.state.selection.main.from)
+              return true
+            },
+            drop(event, view) {
+              // Always swallow drops: external file drops are handled natively
+              // via Wails' OnFileDrop (see "image:dropped" listener below),
+              // since WebKitGTK doesn't reliably expose dataTransfer.files here
+              // and would otherwise fall back to inserting the raw file path.
+              event.preventDefault()
+              const file = Array.from(event.dataTransfer?.files ?? []).find((f) => f.type.startsWith('image/'))
+              if (file) {
+                const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.from
+                handleImageFile(file, view, pos)
+              }
+              return true
+            },
+          }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               source = update.state.doc.toString()
@@ -505,6 +568,32 @@
       return {
         changes: [{ from: range.from, to: range.to, insert }],
         range: EditorSelection.range(range.from + label.length + 3, range.from + label.length + 6),
+      }
+    })
+    view.dispatch(view.state.update(tr))
+    view.focus()
+  }
+
+  function insertAtCursor(text: string): void {
+    if (!editorView) return
+    const view = editorView
+    const pos = view.state.selection.main.from
+    view.dispatch({
+      changes: { from: pos, insert: text },
+      selection: { anchor: pos + text.length },
+    })
+    view.focus()
+  }
+
+  function insertCodeBlock(): void {
+    if (!editorView) return
+    const view = editorView
+    const tr = view.state.changeByRange((range) => {
+      const text = view.state.doc.sliceString(range.from, range.to)
+      const insert = `\`\`\`\n${text}\n\`\`\``
+      return {
+        changes: [{ from: range.from, to: range.to, insert }],
+        range: EditorSelection.cursor(range.from + 4 + text.length),
       }
     })
     view.dispatch(view.state.update(tr))
@@ -716,6 +805,15 @@
     vaultPath = await GetVaultPath()
     await refreshList()
     EventsOn('vault:changed', onVaultChanged)
+    EventsOn('image:dropped', (x: number, y: number, relPath: string) => {
+      if (!editorView) return
+      const pos = editorView.posAtCoords({ x, y }) ?? editorView.state.selection.main.from
+      const insert = `![](${relPath})`
+      editorView.dispatch({
+        changes: { from: pos, insert },
+        selection: { anchor: pos + insert.length },
+      })
+    })
   })
 </script>
 
@@ -865,14 +963,27 @@
   {:else if currentNote}
     <div class="editor" class:full={viewMode === 'editor'} class:hidden={viewMode === 'preview'}>
       <div class="editor-toolbar">
+        <button on:click={() => editorView && undo(editorView)} title="元に戻す"><Undo2 size={15} /></button>
+        <button on:click={() => editorView && redo(editorView)} title="やり直す"><Redo2 size={15} /></button>
+        <span class="toolbar-divider"></span>
+        <button on:click={() => prefixLines('## ')} title="見出し"><Heading2 size={15} /></button>
         <button on:click={() => wrapSelection('**')} title="太字"><Bold size={15} /></button>
         <button on:click={() => wrapSelection('*')} title="斜体"><Italic size={15} /></button>
+        <button on:click={() => wrapSelection('<u>', '</u>')} title="下線"><Underline size={15} /></button>
         <button on:click={() => wrapSelection('~~')} title="取り消し線"><Strikethrough size={15} /></button>
+        <span class="toolbar-divider"></span>
         <button on:click={() => wrapSelection('`')} title="インラインコード"><Code size={15} /></button>
-        <button on:click={() => prefixLines('## ')} title="見出し"><Heading2 size={15} /></button>
+        <button on:click={insertCodeBlock} title="コードブロック"><Code2 size={15} /></button>
         <button on:click={insertLink} title="リンク"><LinkIcon size={15} /></button>
+        <button on:click={insertImageFromFile} title="画像を挿入"><Image size={15} /></button>
+        <span class="toolbar-divider"></span>
         <button on:click={() => prefixLines('- ')} title="箇条書き"><List size={15} /></button>
+        <button on:click={() => prefixLines('1. ')} title="番号付きリスト"><ListOrdered size={15} /></button>
+        <button on:click={() => prefixLines('- [ ] ')} title="チェックリスト"><ListChecks size={15} /></button>
         <button on:click={() => prefixLines('> ')} title="引用"><Quote size={15} /></button>
+        <span class="toolbar-divider"></span>
+        <button on:click={() => insertAtCursor('\n---\n')} title="水平線"><Minus size={15} /></button>
+        <button on:click={() => insertAtCursor('\n| 見出し1 | 見出し2 |\n| --- | --- |\n|  |  |\n')} title="表"><Table size={15} /></button>
       </div>
       {#key currentNote + theme}
         <div class="editor-mount" use:initEditor></div>
@@ -1300,6 +1411,7 @@
   .editor-toolbar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.2rem;
     padding: 0.3rem 0.5rem;
     border-bottom: 1px solid var(--border);
@@ -1319,6 +1431,13 @@
   .editor-toolbar button:hover {
     background: var(--bg-hover);
     color: var(--text);
+  }
+
+  .toolbar-divider {
+    width: 1px;
+    height: 1.2rem;
+    background: var(--border);
+    margin: 0 0.2rem;
   }
 
   .editor-mount {

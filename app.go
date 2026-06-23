@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +22,7 @@ import (
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer/html"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,6 +52,9 @@ func NewApp() *App {
 				highlighting.WithStyle("onedark"),
 			),
 		),
+		goldmark.WithRendererOptions(
+			html.WithUnsafe(),
+		),
 	)
 	return &App{md: md}
 }
@@ -69,6 +75,38 @@ func (a *App) startup(ctx context.Context) {
 	}
 	os.MkdirAll(a.vaultPath, 0755)
 	a.startWatcher()
+	runtime.OnFileDrop(ctx, a.onFileDrop)
+}
+
+// onFileDrop handles files dropped onto the window via Wails' native OS-level
+// drag and drop (more reliable than the webview's own HTML5 DnD on Linux).
+// Image files are copied into the vault's attachments folder; the frontend
+// is notified via an "image:dropped" event so it can insert a markdown
+// reference at the drop position.
+func (a *App) onFileDrop(x int, y int, paths []string) {
+	for _, p := range paths {
+		if !isImageExt(strings.ToLower(filepath.Ext(p))) {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		path, relPath := a.uniqueAttachmentPath(filepath.Base(p))
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			continue
+		}
+		runtime.EventsEmit(a.ctx, "image:dropped", x, y, relPath)
+	}
+}
+
+func isImageExt(ext string) bool {
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg":
+		return true
+	default:
+		return false
+	}
 }
 
 // startWatcher watches the vault directory (recursively) for external
@@ -217,7 +255,9 @@ func parseFrontmatter(content string) ([]string, string) {
 
 // RenderMarkdown converts markdown source to HTML. [[note]] wikilinks are
 // rewritten into knote:// links so the frontend can intercept clicks on them.
-// Any leading YAML frontmatter is stripped from the rendered output.
+// Any leading YAML frontmatter is stripped from the rendered output. Local
+// image references are inlined as base64 data URIs so they render correctly
+// inside the webview regardless of asset-serving restrictions.
 func (a *App) RenderMarkdown(src string) string {
 	_, body := parseFrontmatter(src)
 	body = wikilinkPattern.ReplaceAllString(body, "[$1](<knote:$1>)")
@@ -226,7 +266,102 @@ func (a *App) RenderMarkdown(src string) string {
 	if err := a.md.Convert([]byte(body), &buf); err != nil {
 		return ""
 	}
-	return buf.String()
+	return a.inlineImages(buf.String())
+}
+
+var (
+	imgTagPattern  = regexp.MustCompile(`<img[^>]*>`)
+	srcAttrPattern = regexp.MustCompile(`src="([^"]*)"`)
+)
+
+// inlineImages rewrites <img src="..."> tags whose src is a vault-relative
+// path into base64 data URIs, leaving http(s)/data URLs untouched.
+func (a *App) inlineImages(htmlStr string) string {
+	return imgTagPattern.ReplaceAllStringFunc(htmlStr, func(tag string) string {
+		m := srcAttrPattern.FindStringSubmatch(tag)
+		if m == nil {
+			return tag
+		}
+		src := m[1]
+		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "data:") {
+			return tag
+		}
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, src))
+		if err != nil {
+			return tag
+		}
+		mimeType := mime.TypeByExtension(filepath.Ext(src))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		encoded := base64.StdEncoding.EncodeToString(data)
+		newSrc := fmt.Sprintf(`src="data:%s;base64,%s"`, mimeType, encoded)
+		return srcAttrPattern.ReplaceAllString(tag, newSrc)
+	})
+}
+
+// uniqueAttachmentPath returns a collision-free absolute path (and its
+// vault-relative form) for filename inside the vault's attachments folder
+func (a *App) uniqueAttachmentPath(filename string) (string, string) {
+	dir := filepath.Join(a.vaultPath, "attachments")
+	os.MkdirAll(dir, 0755)
+
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	if base == "" {
+		base = "image"
+	}
+
+	name := base + ext
+	path := filepath.Join(dir, name)
+	for i := 1; ; i++ {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			break
+		}
+		name = fmt.Sprintf("%s-%d%s", base, i, ext)
+		path = filepath.Join(dir, name)
+	}
+	return path, "attachments/" + name
+}
+
+// SaveImage writes base64-encoded image data into the vault's attachments
+// folder, returning the vault-relative path to reference it from markdown
+func (a *App) SaveImage(filename string, base64Data string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", err
+	}
+	path, relPath := a.uniqueAttachmentPath(filename)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", err
+	}
+	return relPath, nil
+}
+
+// SelectImage opens a native file picker for the user to choose an image,
+// copies it into the vault's attachments folder, and returns the
+// vault-relative path. Returns an empty string if the dialog was cancelled.
+func (a *App) SelectImage() (string, error) {
+	picked, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "画像を選択",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Images (*.png, *.jpg, *.jpeg, *.gif, *.webp, *.bmp, *.svg)", Pattern: "*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.svg"},
+		},
+	})
+	if err != nil || picked == "" {
+		return "", err
+	}
+
+	data, err := os.ReadFile(picked)
+	if err != nil {
+		return "", err
+	}
+
+	path, relPath := a.uniqueAttachmentPath(filepath.Base(picked))
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", err
+	}
+	return relPath, nil
 }
 
 // GetTags returns the tags declared in the given note's frontmatter
