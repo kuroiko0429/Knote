@@ -17,6 +17,7 @@
   import type { TreeNode } from './TreeItem.svelte'
   import GraphView from './GraphView.svelte'
   import TerminalPanel from './Terminal.svelte'
+  import Kanban from './Kanban.svelte'
   import {
     FilePlus,
     FolderPlus,
@@ -149,6 +150,19 @@
   let noteTags: string[] = []
   let viewMode: 'split' | 'editor' | 'preview' = 'split'
   let showSettings = false
+  let showKanban = false
+
+  function isKanbanNote(src: string): boolean {
+    const fm = src.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+    if (!fm) return false
+    return /^\s*kanban:\s*true\s*$/m.test(fm[1])
+  }
+
+  function onKanbanChange(e: CustomEvent<string>) {
+    source = e.detail
+    SaveNote(currentNote!, source)
+    lastSelfSavedContent.set(currentNote!, source)
+  }
   let settingsCategory: 'general' | 'appearance' | 'templates' = 'general'
   let showQuickSwitcher = false
   let qsQuery = ''
@@ -457,6 +471,7 @@
   async function selectNote(name: string): Promise<void> {
     source = await ReadNote(name)
     currentNote = name
+    showKanban = isKanbanNote(source)
     await render()
     backlinks = await GetBacklinks(name)
     noteTags = await GetTags(name)
@@ -1271,7 +1286,7 @@
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
       {#if breadcrumb}<span class="breadcrumb">{breadcrumb}</span>{/if}
-      {#if currentNote && !showGraph}
+      {#if currentNote && !showGraph && !showKanban}
         <div class="view-mode-toggle">
           <button
             class:active={viewMode === 'editor'}
@@ -1290,7 +1305,7 @@
           ><PanelRight size={15} /></button>
         </div>
       {/if}
-      {#if currentNote && !showGraph && viewMode !== 'editor'}
+      {#if currentNote && !showGraph && !showKanban && viewMode !== 'editor'}
         <button on:click={() => (showOutline = !showOutline)} title="アウトライン" class:active={showOutline}>
           <AlignLeft size={16} />
         </button>
@@ -1368,7 +1383,7 @@
     style="left: {sidebarWidth - 2}px"
     on:pointerdown={(e) => startDrag('sidebar', e)}
   ></div>
-  {#if currentNote && !showGraph && viewMode === 'split'}
+  {#if currentNote && !showGraph && !showKanban && viewMode === 'split'}
     <div
       class="resize-handle resize-handle-v"
       style="left: {sidebarWidth + editorWidth - 2}px"
@@ -1395,6 +1410,10 @@
   {#if showGraph}
     <div class="graph-view">
       <GraphView {notes} edges={graphEdges} {currentNote} on:select={onGraphSelect} />
+    </div>
+  {:else if currentNote && showKanban}
+    <div class="kanban-area">
+      <Kanban {source} on:change={onKanbanChange} />
     </div>
   {:else if currentNote}
     <div class="editor" class:full={viewMode === 'editor'} class:hidden={viewMode === 'preview'}>
@@ -2278,6 +2297,14 @@
     grid-row: 3;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .kanban-area {
+    grid-column: 2 / 4;
+    grid-row: 3;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .bottombar {
