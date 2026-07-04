@@ -4,6 +4,7 @@
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
   import { EditorState, EditorSelection } from '@codemirror/state'
   import { history, defaultKeymap, historyKeymap, undo, redo } from '@codemirror/commands'
+  import { vim } from '@replit/codemirror-vim'
   import { markdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
@@ -131,6 +132,7 @@
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
+  let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
   let activeTag: string | null = null
   let noteTags: string[] = []
   let viewMode: 'split' | 'editor' | 'preview' = 'split'
@@ -192,6 +194,11 @@
   function toggleTheme(): void {
     theme = theme === 'dark' ? 'light' : 'dark'
     localStorage.setItem('knote-theme', theme)
+  }
+
+  function toggleVim(): void {
+    vimMode = !vimMode
+    localStorage.setItem('knote-vim', String(vimMode))
   }
 
   $: if (typeof document !== 'undefined') {
@@ -570,7 +577,7 @@
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           bracketMatching(),
           highlightActiveLine(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          ...(vimMode ? [vim()] : [keymap.of([...defaultKeymap, ...historyKeymap])]),
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
@@ -1126,7 +1133,7 @@
           </div>
         {/if}
       </div>
-      {#key currentNote + theme}
+      {#key currentNote + theme + vimMode}
         <div class="editor-mount" use:initEditor></div>
       {/key}
     </div>
@@ -1245,6 +1252,11 @@
                 <button class="settings-action" on:click={toggleTheme}>
                   {#if theme === 'dark'}<Sun size={14} />{:else}<Moon size={14} />{/if}
                   テーマ：{theme === 'dark' ? 'ダーク' : 'ライト'}
+                </button>
+              </div>
+              <div class="settings-row">
+                <button class="settings-action" on:click={toggleVim}>
+                  Vimモード：{vimMode ? 'オン' : 'オフ'}
                 </button>
               </div>
             {:else if settingsCategory === 'templates'}
