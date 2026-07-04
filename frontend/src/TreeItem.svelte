@@ -1,7 +1,7 @@
 <script lang="ts" context="module">
   export type TreeNode =
     | { type: 'folder'; name: string; path: string; children: TreeNode[] }
-    | { type: 'note'; name: string; path: string }
+    | { type: 'note'; name: string; path: string; conflict?: boolean }
 </script>
 
 <script lang="ts">
@@ -85,7 +85,7 @@
     {/if}
   </li>
   {#if expanded.has(node.path)}
-    {#each node.children as child (child.path)}
+    {#each node.children as child (child.type + ':' + child.path)}
       <svelte:self
         node={child}
         depth={depth + 1}
@@ -138,11 +138,13 @@
     {:else}
       <span
         class="note-name"
+        class:conflict={node.conflict}
         on:click={() => onSelect(node.path)}
         on:dblclick={() => onRenameStartNote(node.path)}
+        title={node.conflict ? '同名のフォルダと競合しています' : undefined}
       >
         <FileText size={14} />
-        {node.name}
+        {node.name}{#if node.conflict}<span class="conflict-badge">!</span>{/if}
       </span>
     {/if}
   </li>
@@ -194,6 +196,16 @@
   .rename-input {
     flex: 1;
     min-width: 0;
+  }
+
+  .conflict-badge {
+    font-size: 0.65rem;
+    font-weight: bold;
+    color: #e5a000;
+    background: rgba(229, 160, 0, 0.15);
+    border-radius: 3px;
+    padding: 0 3px;
+    line-height: 1.4;
   }
 
 </style>

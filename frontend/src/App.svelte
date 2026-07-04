@@ -52,6 +52,8 @@
     Table,
     Undo2,
     Redo2,
+    Calendar,
+    FileStack,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -73,6 +75,14 @@
     SearchByTag,
     SaveImage,
     SelectImage,
+    GetTemplatesFolder,
+    SetTemplatesFolder,
+    GetDailyNoteFolder,
+    SetDailyNoteFolder,
+    GetDailyNoteTemplate,
+    SetDailyNoteTemplate,
+    ListTemplates,
+    GetTemplateContent,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -93,6 +103,11 @@
   let searchQuery = ''
   let searchTimer: ReturnType<typeof setTimeout>
   let vaultPath = ''
+  let templatesFolder = ''
+  let dailyNoteFolder = ''
+  let dailyNoteTemplate = ''
+  let templateList: string[] = []
+  let showTemplatePicker = false
   let searchInputEl: HTMLInputElement
   let searchFocused = false
   let searchBlurTimer: ReturnType<typeof setTimeout>
@@ -120,7 +135,7 @@
   let noteTags: string[] = []
   let viewMode: 'split' | 'editor' | 'preview' = 'split'
   let showSettings = false
-  let settingsCategory: 'general' | 'appearance' = 'general'
+  let settingsCategory: 'general' | 'appearance' | 'templates' = 'general'
   let showQuickSwitcher = false
   let qsQuery = ''
   let qsIndex = 0
@@ -256,7 +271,8 @@
     }
 
     for (const n of notePaths) {
-      const node: TreeNode = { type: 'note', name: basename(n), path: n }
+      const conflict = folderMap.has(n)
+      const node: TreeNode = { type: 'note', name: basename(n), path: n, ...(conflict && { conflict: true }) }
       const parent = dirname(n)
       if (parent) getOrCreateFolder(parent).children.push(node)
       else rootChildren.push(node)
@@ -445,7 +461,50 @@
     } else if (e.key === 'f') {
       e.preventDefault()
       searchInputEl?.focus()
+    } else if (e.key === 'd') {
+      e.preventDefault()
+      openDailyNote()
     }
+  }
+
+  function todayDateString(): string {
+    const now = new Date()
+    const yyyy = now.getFullYear()
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const dd = String(now.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  async function openDailyNote(): Promise<void> {
+    const date = todayDateString()
+    const folder = dailyNoteFolder || 'daily'
+    const path = `${folder}/${date}`
+    if (!notes.includes(path)) {
+      await CreateNote(path)
+      let content = `# ${date}\n\n`
+      if (dailyNoteTemplate) {
+        try {
+          content = (await GetTemplateContent(dailyNoteTemplate)).split('{{date}}').join(date)
+        } catch {
+          // template missing; fall back to the default header
+        }
+      }
+      await SaveNote(path, content)
+      expanded = new Set(expanded).add(folder)
+      await refreshList()
+    }
+    await openTab(path)
+  }
+
+  async function loadTemplateList(): Promise<void> {
+    templateList = await ListTemplates()
+  }
+
+  async function insertTemplate(name: string): Promise<void> {
+    showTemplatePicker = false
+    if (!editorView) return
+    const content = (await GetTemplateContent(name)).split('{{date}}').join(todayDateString())
+    insertAtCursor(content)
   }
 
   const livePreviewStyle = HighlightStyle.define([
@@ -634,6 +693,7 @@
 
   function closeContextMenu(): void {
     contextMenu = null
+    showTemplatePicker = false
   }
 
   function onSidebarContextMenu(e: MouseEvent): void {
@@ -830,10 +890,12 @@
     searchQuery = ''
     activeTag = null
     await refreshList()
+    await loadTemplateList()
   }
 
   async function onVaultChanged(): Promise<void> {
     await refreshList()
+    await loadTemplateList()
     openTabs = openTabs.filter((p) => notes.includes(p))
     if (currentNote && !notes.includes(currentNote)) {
       clearCurrentNoteView()
@@ -845,6 +907,10 @@
 
   onMount(async () => {
     vaultPath = await GetVaultPath()
+    templatesFolder = await GetTemplatesFolder()
+    dailyNoteFolder = await GetDailyNoteFolder()
+    dailyNoteTemplate = await GetDailyNoteTemplate()
+    await loadTemplateList()
     await refreshList()
     EventsOn('vault:changed', onVaultChanged)
     EventsOn('image:dropped', (x: number, y: number, relPath: string) => {
@@ -895,6 +961,7 @@
           <AlignLeft size={16} />
         </button>
       {/if}
+      <button on:click={openDailyNote} title="デイリーノート (Ctrl+D)"><Calendar size={16} /></button>
       <button on:click={toggleGraph} title="グラフ">
         {#if showGraph}<X size={16} />{:else}<Network size={16} />{/if}
       </button>
@@ -960,7 +1027,7 @@
           </li>
         {/each}
       {:else}
-        {#each tree as node (node.path)}
+        {#each tree as node (node.type + ':' + node.path)}
           <TreeItem
             {node}
             depth={0}
@@ -1042,6 +1109,21 @@
         <span class="toolbar-divider"></span>
         <button on:click={() => insertAtCursor('\n---\n')} title="水平線"><Minus size={15} /></button>
         <button on:click={() => insertAtCursor('\n| 見出し1 | 見出し2 |\n| --- | --- |\n|  |  |\n')} title="表"><Table size={15} /></button>
+        {#if templateList.length}
+          <span class="toolbar-divider"></span>
+          <div class="template-picker">
+            <button on:click|stopPropagation={() => (showTemplatePicker = !showTemplatePicker)} title="テンプレートを挿入">
+              <FileStack size={15} />
+            </button>
+            {#if showTemplatePicker}
+              <div class="template-picker-menu">
+                {#each templateList as name}
+                  <button on:click={() => insertTemplate(name)}>{name}</button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
       {#key currentNote + theme}
         <div class="editor-mount" use:initEditor></div>
@@ -1131,6 +1213,10 @@
               class:active={settingsCategory === 'appearance'}
               on:click={() => (settingsCategory = 'appearance')}
             >外観</button>
+            <button
+              class:active={settingsCategory === 'templates'}
+              on:click={() => (settingsCategory = 'templates')}
+            >テンプレート</button>
           </nav>
           <div class="settings-content">
             {#if settingsCategory === 'general'}
@@ -1148,6 +1234,40 @@
                   テーマ：{theme === 'dark' ? 'ダーク' : 'ライト'}
                 </button>
               </div>
+            {:else if settingsCategory === 'templates'}
+              <h3>テンプレート</h3>
+              <div class="settings-row">
+                <span>テンプレートフォルダ</span>
+                <input
+                  type="text"
+                  bind:value={templatesFolder}
+                  on:change={async () => {
+                    await SetTemplatesFolder(templatesFolder)
+                    await loadTemplateList()
+                  }}
+                />
+              </div>
+              <div class="settings-row">
+                <span>デイリーノートフォルダ</span>
+                <input
+                  type="text"
+                  bind:value={dailyNoteFolder}
+                  on:change={() => SetDailyNoteFolder(dailyNoteFolder)}
+                />
+              </div>
+              <div class="settings-row">
+                <span>デイリーノートのテンプレート</span>
+                <select
+                  bind:value={dailyNoteTemplate}
+                  on:change={() => SetDailyNoteTemplate(dailyNoteTemplate)}
+                >
+                  <option value="">なし</option>
+                  {#each templateList as name}
+                    <option value={name}>{name}</option>
+                  {/each}
+                </select>
+              </div>
+              <p class="settings-hint">テンプレート内の <code>{'{{date}}'}</code> は挿入時に日付へ置き換わる</p>
             {/if}
           </div>
         </div>
@@ -1547,6 +1667,43 @@
     margin: 0 0.2rem;
   }
 
+  .template-picker {
+    position: relative;
+  }
+
+  .template-picker-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    min-width: 140px;
+    margin-top: 0.2rem;
+    padding: 0.3rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .template-picker-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 0.8rem;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .template-picker-menu button:hover {
+    background: var(--bg-hover);
+  }
+
   .editor-mount {
     flex: 1;
     min-height: 0;
@@ -1906,6 +2063,26 @@
   .settings-row .vault-path {
     flex: 1;
     max-width: none;
+  }
+
+  .settings-row > span {
+    flex: 1;
+  }
+
+  .settings-row input[type='text'],
+  .settings-row select {
+    padding: 0.3rem 0.5rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+
+  .settings-hint {
+    padding: 0.3rem;
+    font-size: 0.75rem;
+    opacity: 0.6;
   }
 
   .settings-action {

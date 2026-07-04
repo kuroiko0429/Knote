@@ -28,16 +28,22 @@ import (
 
 // App struct
 type App struct {
-	ctx       context.Context
-	md        goldmark.Markdown
-	vaultPath string
-	watcher   *fsnotify.Watcher
-	ptmx      *os.File
-	shellCmd  *exec.Cmd
+	ctx               context.Context
+	md                goldmark.Markdown
+	vaultPath         string
+	templatesFolder   string
+	dailyNoteFolder   string
+	dailyNoteTemplate string
+	watcher           *fsnotify.Watcher
+	ptmx              *os.File
+	shellCmd          *exec.Cmd
 }
 
 type appConfig struct {
-	VaultPath string `json:"vaultPath"`
+	VaultPath         string `json:"vaultPath"`
+	TemplatesFolder   string `json:"templatesFolder"`
+	DailyNoteFolder   string `json:"dailyNoteFolder"`
+	DailyNoteTemplate string `json:"dailyNoteTemplate"`
 }
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
@@ -64,8 +70,9 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	if saved := a.loadConfig().VaultPath; saved != "" {
-		a.vaultPath = saved
+	cfg := a.loadConfig()
+	if cfg.VaultPath != "" {
+		a.vaultPath = cfg.VaultPath
 	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -73,6 +80,16 @@ func (a *App) startup(ctx context.Context) {
 		}
 		a.vaultPath = filepath.Join(home, "Knote")
 	}
+	a.templatesFolder = cfg.TemplatesFolder
+	if a.templatesFolder == "" {
+		a.templatesFolder = "templates"
+	}
+	a.dailyNoteFolder = cfg.DailyNoteFolder
+	if a.dailyNoteFolder == "" {
+		a.dailyNoteFolder = "daily"
+	}
+	a.dailyNoteTemplate = cfg.DailyNoteTemplate
+
 	os.MkdirAll(a.vaultPath, 0755)
 	a.startWatcher()
 	runtime.OnFileDrop(ctx, a.onFileDrop)
@@ -192,7 +209,12 @@ func (a *App) saveConfig() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	data, err := json.Marshal(appConfig{VaultPath: a.vaultPath})
+	data, err := json.Marshal(appConfig{
+		VaultPath:         a.vaultPath,
+		TemplatesFolder:   a.templatesFolder,
+		DailyNoteFolder:   a.dailyNoteFolder,
+		DailyNoteTemplate: a.dailyNoteTemplate,
+	})
 	if err != nil {
 		return err
 	}
@@ -202,6 +224,71 @@ func (a *App) saveConfig() error {
 // GetVaultPath returns the currently active vault directory
 func (a *App) GetVaultPath() string {
 	return a.vaultPath
+}
+
+// GetTemplatesFolder returns the vault-relative folder used for templates
+func (a *App) GetTemplatesFolder() string {
+	return a.templatesFolder
+}
+
+// SetTemplatesFolder updates the vault-relative folder used for templates
+func (a *App) SetTemplatesFolder(path string) error {
+	a.templatesFolder = path
+	return a.saveConfig()
+}
+
+// GetDailyNoteFolder returns the vault-relative folder used for daily notes
+func (a *App) GetDailyNoteFolder() string {
+	return a.dailyNoteFolder
+}
+
+// SetDailyNoteFolder updates the vault-relative folder used for daily notes
+func (a *App) SetDailyNoteFolder(path string) error {
+	a.dailyNoteFolder = path
+	return a.saveConfig()
+}
+
+// GetDailyNoteTemplate returns the template name used for new daily notes
+// (empty means no template)
+func (a *App) GetDailyNoteTemplate() string {
+	return a.dailyNoteTemplate
+}
+
+// SetDailyNoteTemplate updates the template used for new daily notes
+func (a *App) SetDailyNoteTemplate(name string) error {
+	a.dailyNoteTemplate = name
+	return a.saveConfig()
+}
+
+// ListTemplates returns the names of templates in the templates folder
+func (a *App) ListTemplates() ([]string, error) {
+	dir := filepath.Join(a.vaultPath, a.templatesFolder)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+
+	names := []string{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		names = append(names, strings.TrimSuffix(e.Name(), ".md"))
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// GetTemplateContent returns the raw content of the given template
+func (a *App) GetTemplateContent(name string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(a.vaultPath, a.templatesFolder, name+".md"))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // SelectVault opens a folder picker and switches the vault to the chosen
