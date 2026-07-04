@@ -146,12 +146,43 @@
   let qsIndex = 0
   let qsInputEl: HTMLInputElement
 
-  $: qsResults = qsQuery.trim()
-    ? notes.filter((n) => n.toLowerCase().includes(qsQuery.trim().toLowerCase()))
-    : notes
-  $: qsExactMatch = notes.includes(qsQuery.trim())
-  $: qsShowCreate = qsQuery.trim().length > 0 && !qsExactMatch
-  $: qsTotal = qsResults.length + (qsShowCreate ? 1 : 0)
+  type PaletteItem =
+    | { kind: 'cmd'; label: string; action: () => void }
+    | { kind: 'note'; path: string }
+    | { kind: 'create'; path: string }
+
+  $: paletteCommands = [
+    { label: '新規ノートを作成', action: () => createNoteAt('') },
+    { label: 'デイリーノートを開く (Ctrl+D)', action: openDailyNote },
+    { label: `テーマを${theme === 'dark' ? 'ライト' : 'ダーク'}に切り替え`, action: toggleTheme },
+    { label: `Vimモードを${vimMode ? '無効化' : '有効化'}`, action: toggleVim },
+    { label: `表示: ${viewMode === 'split' ? 'エディタのみ' : viewMode === 'editor' ? 'プレビューのみ' : '分割'}に切り替え`, action: () => { viewMode = viewMode === 'split' ? 'editor' : viewMode === 'editor' ? 'preview' : 'split' } },
+    { label: `ターミナルを${showTerminal ? '閉じる' : '開く'}`, action: () => { showTerminal = !showTerminal } },
+    { label: 'グラフビューを表示', action: () => { showGraph = true } },
+    { label: '設定を開く', action: () => { showSettings = true } },
+    ...(currentNote ? [{ label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } }] : []),
+  ]
+
+  $: paletteItems = (() => {
+    const q = qsQuery.trim()
+    const ql = q.toLowerCase()
+    const items: PaletteItem[] = []
+    if (q.startsWith('>')) {
+      const cmdQ = ql.slice(1).trim()
+      for (const cmd of paletteCommands) {
+        if (!cmdQ || cmd.label.toLowerCase().includes(cmdQ)) {
+          items.push({ kind: 'cmd', label: cmd.label, action: cmd.action })
+        }
+      }
+    } else {
+      const noteResults = q ? notes.filter((n) => n.toLowerCase().includes(ql)) : notes.slice(0, 20)
+      for (const path of noteResults) items.push({ kind: 'note', path })
+      if (q && !notes.includes(q)) items.push({ kind: 'create', path: q })
+    }
+    return items
+  })()
+
+  $: qsTotal = paletteItems.length
   $: if (qsIndex >= qsTotal) qsIndex = Math.max(0, qsTotal - 1)
 
   function openQuickSwitcher(): void {
@@ -165,13 +196,19 @@
     showQuickSwitcher = false
   }
 
-  async function qsSelect(path: string): Promise<void> {
+  async function executeItem(item: PaletteItem): Promise<void> {
     closeQuickSwitcher()
-    if (!notes.includes(path)) {
-      await CreateNote(path)
-      await refreshList()
+    if (item.kind === 'cmd') {
+      item.action()
+    } else if (item.kind === 'note') {
+      await openTab(item.path)
+    } else {
+      if (!notes.includes(item.path)) {
+        await CreateNote(item.path)
+        await refreshList()
+      }
+      await openTab(item.path)
     }
-    await openTab(path)
   }
 
   function onQsKeydown(e: KeyboardEvent): void {
@@ -186,11 +223,8 @@
       qsIndex = Math.max(qsIndex - 1, 0)
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      if (qsIndex < qsResults.length) {
-        qsSelect(qsResults[qsIndex])
-      } else if (qsShowCreate) {
-        qsSelect(qsQuery.trim())
-      }
+      const item = paletteItems[qsIndex]
+      if (item) executeItem(item)
     }
   }
 
@@ -1354,18 +1388,22 @@
           bind:value={qsQuery}
           on:keydown={onQsKeydown}
           class="qs-input"
-          placeholder="ノートを開く、または新規作成..."
+          placeholder={qsQuery.startsWith('>') ? 'コマンドを検索...' : 'ノートを開く... (「>」でコマンド)'}
         />
         <ul class="qs-list">
-          {#each qsResults as path, i}
-            <li class:active={i === qsIndex} on:click={() => qsSelect(path)}>
-              <FileText size={14} />{path}
+          {#each paletteItems as item, i}
+            <li class:active={i === qsIndex} on:click={() => executeItem(item)}>
+              {#if item.kind === 'cmd'}
+                <Code2 size={14} /><span class="qs-label">{item.label}</span>
+              {:else if item.kind === 'note'}
+                <FileText size={14} />{item.path}
+              {:else}
+                <FilePlus size={14} />新規ノートを作成: "{item.path}"
+              {/if}
             </li>
           {/each}
-          {#if qsShowCreate}
-            <li class:active={qsIndex === qsResults.length} on:click={() => qsSelect(qsQuery.trim())}>
-              <FilePlus size={14} />新規ノートを作成: "{qsQuery.trim()}"
-            </li>
+          {#if paletteItems.length === 0}
+            <li class="qs-empty">一致する項目がありません</li>
           {/if}
         </ul>
       </div>
@@ -2072,6 +2110,28 @@
 
   .qs-list li.active {
     background: var(--accent-hover);
+  }
+
+  .qs-list li:hover {
+    background: var(--bg-hover);
+  }
+
+  .qs-list li.active:hover {
+    background: var(--accent-hover);
+  }
+
+  .qs-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    justify-content: center;
+    cursor: default;
+  }
+
+  .qs-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .settings-modal {
