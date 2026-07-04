@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte'
+  import { createEventDispatcher, tick } from 'svelte'
   import { CheckSquare, Square, Plus, X, GripVertical } from 'lucide-svelte'
 
   export let source: string
@@ -7,6 +7,7 @@
   const dispatch = createEventDispatcher<{ change: string }>()
 
   let skipNextSourceUpdate = false
+  let kanbanEl: HTMLDivElement
 
   interface KanbanCard {
     text: string
@@ -98,10 +99,18 @@
     emit()
   }
 
-  function removeColumn(ci: number) {
+  async function removeColumn(ci: number) {
     columns.splice(ci, 1)
     columns = columns
     emit()
+    await tick()
+    if (kanbanEl) {
+      const max = Math.max(0, kanbanEl.scrollWidth - kanbanEl.clientWidth)
+      kanbanEl.scrollLeft = Math.min(kanbanEl.scrollLeft, max)
+      // WebKitGTK のスクロール状態を強制リフレッシュ
+      kanbanEl.style.overflowX = 'hidden'
+      requestAnimationFrame(() => { kanbanEl.style.overflowX = 'auto' })
+    }
   }
 
   let newCardText: string[] = []
@@ -189,7 +198,7 @@
   }
 </script>
 
-<div class="kanban">
+<div class="kanban" bind:this={kanbanEl}>
   {#each columns as col, ci}
     <div
       class="column"
