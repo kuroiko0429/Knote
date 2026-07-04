@@ -46,6 +46,7 @@ type appConfig struct {
 	TemplatesFolder   string `json:"templatesFolder"`
 	DailyNoteFolder   string `json:"dailyNoteFolder"`
 	DailyNoteTemplate string `json:"dailyNoteTemplate"`
+	ActiveTheme       string `json:"activeTheme"`
 }
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
@@ -1150,4 +1151,59 @@ func (a *App) ExportPDF(notePath string) (string, error) {
 		return "", fmt.Errorf("PDF 生成失敗: %w\n%s", err, out)
 	}
 	return outPath, nil
+}
+
+func (a *App) themeDir() string {
+	return filepath.Join(a.vaultPath, ".knote", "theme")
+}
+
+func (a *App) ListThemes() []string {
+	entries, err := os.ReadDir(a.themeDir())
+	if err != nil {
+		return []string{}
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".css") {
+			names = append(names, strings.TrimSuffix(e.Name(), ".css"))
+		}
+	}
+	return names
+}
+
+func (a *App) LoadTheme(name string) (string, error) {
+	if name == "" {
+		return "", nil
+	}
+	safe := filepath.Clean(name + ".css")
+	if strings.Contains(safe, string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid theme name")
+	}
+	data, err := os.ReadFile(filepath.Join(a.themeDir(), safe))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (a *App) GetActiveTheme() string {
+	return a.loadConfig().ActiveTheme
+}
+
+func (a *App) SetActiveTheme(name string) error {
+	cfg := a.loadConfig()
+	cfg.ActiveTheme = name
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	p, err := a.configPath()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0o600)
+}
+
+func (a *App) GetThemeDir() string {
+	return a.themeDir()
 }

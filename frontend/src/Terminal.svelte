@@ -9,16 +9,35 @@
   export let visible: boolean
 
   let container: HTMLDivElement
+
+  export function refreshTheme() {
+    if (!term) return
+    const s = getComputedStyle(document.documentElement)
+    const newTheme = {
+      background:          s.getPropertyValue('--bg').trim() || '#1b2636',
+      foreground:          s.getPropertyValue('--text').trim() || '#ffffff',
+      cursor:              s.getPropertyValue('--text').trim() || '#ffffff',
+      selectionBackground: s.getPropertyValue('--bg-hover').trim() || 'rgba(255,255,255,0.1)',
+    }
+    // xterm v5/v6 両対応
+    try { term.options.theme = newTheme } catch {}
+    try { (term as any).setOption?.('theme', newTheme) } catch {}
+  }
   let term: Terminal | null = null
   let fitAddon: FitAddon | null = null
   let resizeObserver: ResizeObserver
 
   onMount(async () => {
+    const s = getComputedStyle(document.documentElement)
     term = new Terminal({
       fontSize: 13,
       fontFamily: 'monospace',
       cursorBlink: true,
-      theme: { background: '#1b2636' },
+      theme: {
+        background: s.getPropertyValue('--bg').trim(),
+        foreground: s.getPropertyValue('--text').trim(),
+        cursor:     s.getPropertyValue('--text').trim(),
+      },
     })
     fitAddon = new FitAddon()
     term.loadAddon(fitAddon)

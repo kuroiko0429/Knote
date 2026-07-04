@@ -94,6 +94,11 @@
     PrepareRunFile,
     ExportHTML,
     ExportPDF,
+    ListThemes,
+    LoadTheme,
+    GetActiveTheme,
+    SetActiveTheme,
+    GetThemeDir,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -150,6 +155,41 @@
   let noteTags: string[] = []
   let viewMode: 'split' | 'editor' | 'preview' = 'split'
   let showSettings = false
+  let themeList: string[] = []
+  let activeTheme = ''
+  let themeStyleEl: HTMLStyleElement | null = null
+  let terminalRef: { refreshTheme: () => void } | null = null
+
+  async function applyTheme(name: string) {
+    activeTheme = name
+    if (!themeStyleEl) {
+      themeStyleEl = document.createElement('style')
+      themeStyleEl.id = 'knote-custom-theme'
+      document.head.appendChild(themeStyleEl)
+    }
+    if (!name) {
+      themeStyleEl.textContent = ''
+      return
+    }
+    try {
+      const css = await LoadTheme(name)
+      themeStyleEl.textContent = css
+    } catch {
+      themeStyleEl.textContent = ''
+    }
+    requestAnimationFrame(() => terminalRef?.refreshTheme())
+  }
+
+  async function selectTheme(name: string) {
+    await applyTheme(name)
+    await SetActiveTheme(name)
+  }
+
+  async function onThemeChange(e: Event) {
+    const val = (e.target as HTMLSelectElement).value
+    await selectTheme(val)
+    themeList = await ListThemes()
+  }
   let showKanban = false
 
   function isKanbanNote(src: string): boolean {
@@ -202,7 +242,7 @@
     { label: `表示: ${viewMode === 'split' ? 'エディタのみ' : viewMode === 'editor' ? 'プレビューのみ' : '分割'}に切り替え`, action: () => { viewMode = viewMode === 'split' ? 'editor' : viewMode === 'editor' ? 'preview' : 'split' } },
     { label: `ターミナルを${showTerminal ? '閉じる' : '開く'}`, action: () => { showTerminal = !showTerminal } },
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
-    { label: '設定を開く', action: () => { showSettings = true } },
+    { label: '設定を開く', action: async () => { showSettings = true; themeList = await ListThemes() } },
     ...(currentNote ? [{ label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } }] : []),
     { label: 'テーブルを整形 (Markdown)', action: () => { if (editorView) formatCurrentTable(editorView) } },
     ...(currentNote ? [{ label: 'HTMLとしてエクスポート', action: doExportHTML }] : []),
@@ -286,6 +326,7 @@
 
   $: if (typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-theme', theme)
+    requestAnimationFrame(() => terminalRef?.refreshTheme())
   }
 
   let showTerminal = false
@@ -1242,6 +1283,9 @@
     templatesFolder = await GetTemplatesFolder()
     dailyNoteFolder = await GetDailyNoteFolder()
     dailyNoteTemplate = await GetDailyNoteTemplate()
+    themeList = await ListThemes()
+    const saved = await GetActiveTheme()
+    if (saved) await applyTheme(saved)
     await loadTemplateList()
     await refreshList()
     EventsOn('vault:changed', onVaultChanged)
@@ -1509,11 +1553,11 @@
       <span><TerminalSquare size={13} /> ターミナル</span>
       <button on:click={toggleTerminal}><X size={14} /></button>
     </div>
-    <TerminalPanel visible={showTerminal} />
+    <TerminalPanel visible={showTerminal} bind:this={terminalRef} />
   </div>
 
   <footer class="bottombar">
-    <button class="settings-trigger" title="設定" on:click={() => (showSettings = true)}>
+    <button class="settings-trigger" title="設定" on:click={async () => { showSettings = true; themeList = await ListThemes() }}>
       <Settings size={14} />
     </button>
     <div class="bottombar-right">
@@ -1553,7 +1597,7 @@
             >全般</button>
             <button
               class:active={settingsCategory === 'appearance'}
-              on:click={() => (settingsCategory = 'appearance')}
+              on:click={async () => { settingsCategory = 'appearance'; themeList = await ListThemes() }}
             >外観</button>
             <button
               class:active={settingsCategory === 'templates'}
@@ -1580,6 +1624,22 @@
                 <button class="settings-action" on:click={toggleVim}>
                   Vimモード：{vimMode ? 'オン' : 'オフ'}
                 </button>
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">カスタムテーマ</span>
+                <select
+                  class="settings-select"
+                  value={activeTheme}
+                  on:change={onThemeChange}
+                >
+                  <option value="">なし（デフォルト）</option>
+                  {#each themeList as t}
+                    <option value={t}>{t}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="settings-row settings-hint">
+                テーマ CSS を <code>{vaultPath}/.knote/theme/</code> に配置
               </div>
             {:else if settingsCategory === 'templates'}
               <h3>テンプレート</h3>
@@ -1678,6 +1738,24 @@
 <style>
   :global(body) {
     margin: 0;
+  }
+
+  :global(::-webkit-scrollbar) {
+    width: 6px;
+    height: 6px;
+  }
+
+  :global(::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+
+  :global(::-webkit-scrollbar-thumb) {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  :global(::-webkit-scrollbar-thumb:hover) {
+    background: var(--text-dim);
   }
 
   main {
@@ -2558,12 +2636,6 @@
     font-size: 0.85rem;
   }
 
-  .settings-hint {
-    padding: 0.3rem;
-    font-size: 0.75rem;
-    opacity: 0.6;
-  }
-
   .settings-action {
     display: flex;
     align-items: center;
@@ -2579,6 +2651,40 @@
 
   .settings-action:hover {
     background: var(--bg-hover);
+  }
+
+  .settings-label {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-bottom: 0.25rem;
+    display: block;
+  }
+
+  .settings-select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .settings-hint {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+  }
+
+  .settings-hint code {
+    font-size: 0.72rem;
+    background: var(--code-bg);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    word-break: break-all;
   }
 
   .bottombar-right {
