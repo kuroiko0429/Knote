@@ -294,13 +294,14 @@
   $: isFiltering = searchQuery.trim().length > 0 || activeTag !== null
   $: breadcrumb = currentNote ? currentNote.split('/').join(' / ') : ''
 
-  function countChars(htmlStr: string): number {
-    const div = document.createElement('div')
-    div.innerHTML = htmlStr
-    return (div.textContent || '').replace(/\s/g, '').length
+  function countChars(src: string): number {
+    const stripped = src.replace(/^---\n[\s\S]*?\n---\n?/, '')
+    return stripped.replace(/\s/g, '').length
   }
 
-  $: charCount = currentNote ? countChars(html) : 0
+  $: charCount = currentNote ? countChars(source) : 0
+  $: lineCount = currentNote ? source.split('\n').length : 0
+  $: readingMins = charCount > 0 ? Math.max(1, Math.round(charCount / 500)) : 0
 
   function focusInput(el: HTMLInputElement): void {
     el.focus()
@@ -1191,7 +1192,19 @@
         <span class="save-status"><Check size={13} /> {saveStatus}</span>
       {/if}
       {#if currentNote}
-        <span class="char-count">{charCount}文字</span>
+        <span class="note-stats">
+          {charCount}文字
+          <span class="stat-sep">·</span>
+          {lineCount}行
+          {#if outline.length}
+            <span class="stat-sep">·</span>
+            {outline.length}見出し
+          {/if}
+          {#if readingMins}
+            <span class="stat-sep">·</span>
+            {readingMins}分
+          {/if}
+        </span>
       {/if}
       <button on:click={toggleTerminal} title="ターミナル" class:active={showTerminal}>
         <TerminalSquare size={14} />
@@ -2107,6 +2120,17 @@
     align-items: center;
     gap: 0.8rem;
     opacity: 0.7;
+  }
+
+  .note-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+  }
+
+  .stat-sep {
+    opacity: 0.4;
   }
 
   .bottombar-right button {
