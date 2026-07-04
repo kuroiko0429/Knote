@@ -88,6 +88,8 @@
     WriteTerminal,
     StartTerminal,
     PrepareRunFile,
+    ExportHTML,
+    ExportPDF,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -128,6 +130,14 @@
 
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
+  let toast = ''
+  let toastTimer: ReturnType<typeof setTimeout>
+
+  function showToast(msg: string) {
+    toast = msg
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => (toast = ''), 4000)
+  }
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
   let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
@@ -146,6 +156,26 @@
     | { kind: 'note'; path: string }
     | { kind: 'create'; path: string }
 
+  async function doExportHTML() {
+    if (!currentNote) return
+    try {
+      const path = await ExportHTML(currentNote)
+      showToast(`HTML保存: ${path}`)
+    } catch (e) {
+      showToast(`エクスポート失敗: ${e}`)
+    }
+  }
+
+  async function doExportPDF() {
+    if (!currentNote) return
+    try {
+      const path = await ExportPDF(currentNote)
+      showToast(`PDF保存: ${path}`)
+    } catch (e) {
+      showToast(`エクスポート失敗: ${e}`)
+    }
+  }
+
   $: paletteCommands = [
     { label: '新規ノートを作成', action: () => createNoteAt('') },
     { label: 'デイリーノートを開く (Ctrl+D)', action: openDailyNote },
@@ -156,6 +186,8 @@
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
     { label: '設定を開く', action: () => { showSettings = true } },
     ...(currentNote ? [{ label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } }] : []),
+    ...(currentNote ? [{ label: 'HTMLとしてエクスポート', action: doExportHTML }] : []),
+    ...(currentNote ? [{ label: 'PDFとしてエクスポート', action: doExportPDF }] : []),
   ]
 
   $: paletteItems = (() => {
@@ -1018,6 +1050,19 @@
     await loadTemplateList()
     await refreshList()
     EventsOn('vault:changed', onVaultChanged)
+    EventsOn('vault:note-changed', async (noteName: string) => {
+      if (noteName !== currentNote) return
+      const fresh = await ReadNote(noteName)
+      if (fresh === source) return
+      source = fresh
+      if (editorView) {
+        editorView.dispatch({
+          changes: { from: 0, to: editorView.state.doc.length, insert: fresh },
+        })
+      }
+      await render()
+      showToast(`「${noteName}」が外部で変更されたため再読み込みしました`)
+    })
     EventsOn('image:dropped', (x: number, y: number, relPath: string) => {
       if (!editorView) return
       const pos = editorView.posAtCoords({ x, y }) ?? editorView.state.selection.main.from
@@ -1422,6 +1467,10 @@
     </div>
   {/if}
 </main>
+
+{#if toast}
+  <div class="toast">{toast}</div>
+{/if}
 
 <style>
   :global(body) {
@@ -2311,6 +2360,22 @@
     align-items: center;
     gap: 0.25rem;
     color: var(--accent);
+  }
+
+  :global(.toast) {
+    position: fixed;
+    bottom: 2.5rem;
+    right: 1.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-size: 0.82rem;
+    color: var(--text);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    z-index: 9999;
+    max-width: 400px;
+    word-break: break-all;
   }
 
   .context-menu {
