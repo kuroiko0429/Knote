@@ -561,6 +561,17 @@
   ])
 
   let editorView: EditorView | null = null
+  let previewEl: HTMLDivElement
+  let lastEditorScroll = 0
+  let lastPreviewScroll = 0
+
+  function onPreviewScroll(): void {
+    if (!editorView || !previewEl) return
+    if (Date.now() - lastEditorScroll < 120) return
+    lastPreviewScroll = Date.now()
+    const ratio = previewEl.scrollTop / Math.max(1, previewEl.scrollHeight - previewEl.clientHeight)
+    editorView.scrollDOM.scrollTop = ratio * Math.max(0, editorView.scrollDOM.scrollHeight - editorView.scrollDOM.clientHeight)
+  }
 
   async function handleImageFile(file: File, view: EditorView, pos: number): Promise<void> {
     const reader = new FileReader()
@@ -644,6 +655,13 @@
       parent: el,
     })
     editorView = view
+    view.scrollDOM.addEventListener('scroll', () => {
+      if (!previewEl) return
+      if (Date.now() - lastPreviewScroll < 120) return
+      lastEditorScroll = Date.now()
+      const ratio = view.scrollDOM.scrollTop / Math.max(1, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)
+      previewEl.scrollTop = ratio * Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
+    })
     return {
       destroy() {
         view.destroy()
@@ -1165,7 +1183,7 @@
         <div class="editor-mount" use:initEditor></div>
       {/key}
     </div>
-    <div class="preview" class:full={viewMode === 'preview'} class:hidden={viewMode === 'editor'}>
+    <div class="preview" class:full={viewMode === 'preview'} class:hidden={viewMode === 'editor'} bind:this={previewEl} on:scroll={onPreviewScroll}>
       {#if noteTags.length}
         <div class="note-tags">
           {#each noteTags as tag}
