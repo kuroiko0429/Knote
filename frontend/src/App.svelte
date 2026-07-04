@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
-  import { EditorState, EditorSelection } from '@codemirror/state'
+  import { EditorState, EditorSelection, Prec } from '@codemirror/state'
   import { history, defaultKeymap, historyKeymap, undo, redo } from '@codemirror/commands'
   import { vim } from '@replit/codemirror-vim'
   import { markdown } from '@codemirror/lang-markdown'
@@ -130,6 +130,7 @@
 
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
+  let lastSelfSavedContent: Map<string, string> = new Map()
   let toast = ''
   let toastTimer: ReturnType<typeof setTimeout>
 
@@ -186,6 +187,7 @@
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
     { label: '設定を開く', action: () => { showSettings = true } },
     ...(currentNote ? [{ label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } }] : []),
+    { label: 'テーブルを整形 (Markdown)', action: () => { if (editorView) formatCurrentTable(editorView) } },
     ...(currentNote ? [{ label: 'HTMLとしてエクスポート', action: doExportHTML }] : []),
     ...(currentNote ? [{ label: 'PDFとしてエクスポート', action: doExportPDF }] : []),
   ]
@@ -460,6 +462,7 @@
   async function openTab(path: string): Promise<void> {
     if (currentNote) {
       clearTimeout(saveTimer)
+      lastSelfSavedContent.set(currentNote, source)
       await SaveNote(currentNote, source)
     }
     if (!openTabs.includes(path)) {
@@ -546,12 +549,16 @@
     render()
     if (!currentNote) return
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => SaveNote(currentNote!, source), 400)
+    saveTimer = setTimeout(() => {
+      lastSelfSavedContent.set(currentNote!, source)
+      SaveNote(currentNote!, source)
+    }, 400)
   }
 
   async function forceSave(): Promise<void> {
     if (!currentNote) return
     clearTimeout(saveTimer)
+    lastSelfSavedContent.set(currentNote, source)
     await SaveNote(currentNote, source)
     saveStatus = '保存しました'
     clearTimeout(saveStatusTimer)
@@ -684,6 +691,134 @@
     })
   }
 
+  function isTableLine(text: string): boolean {
+    return text.trimStart().startsWith('|')
+  }
+
+  function isSeparatorLine(text: string): boolean {
+    return /^\s*\|[-: |]+\|\s*$/.test(text)
+  }
+
+  function getTableRange(state: EditorState): { from: number; to: number; lines: string[] } | null {
+    const line = state.doc.lineAt(state.selection.main.head)
+    if (!isTableLine(line.text)) return null
+    let startNum = line.number
+    while (startNum > 1 && isTableLine(state.doc.line(startNum - 1).text)) startNum--
+    let endNum = line.number
+    while (endNum < state.doc.lines && isTableLine(state.doc.line(endNum + 1).text)) endNum++
+    const lines: string[] = []
+    for (let i = startNum; i <= endNum; i++) lines.push(state.doc.line(i).text)
+    return { from: state.doc.line(startNum).from, to: state.doc.line(endNum).to, lines }
+  }
+
+  function formatTableText(lines: string[]): string {
+    const rows = lines.map((l) => l.split('|').slice(1, -1).map((c) => c.trim()))
+    const colCount = Math.max(...rows.map((r) => r.length))
+    const widths: number[] = Array(colCount).fill(3)
+    for (const row of rows) {
+      for (let i = 0; i < row.length; i++) {
+        if (!/^[-: ]+$/.test(row[i])) widths[i] = Math.max(widths[i], row[i].length)
+      }
+    }
+    return lines.map((line, ri) => {
+      if (isSeparatorLine(line)) return '| ' + widths.map((w) => '-'.repeat(w)).join(' | ') + ' |'
+      return '| ' + widths.map((w, i) => (rows[ri][i] ?? '').padEnd(w)).join(' | ') + ' |'
+    }).join('\n')
+  }
+
+  function formatCurrentTable(view: EditorView): boolean {
+    const range = getTableRange(view.state)
+    if (!range) return false
+    const formatted = formatTableText(range.lines)
+    const cursorOffset = view.state.selection.main.head - range.from
+    view.dispatch({ changes: { from: range.from, to: range.to, insert: formatted } })
+    const newPos = Math.min(range.from + cursorOffset, range.from + formatted.length)
+    view.dispatch({ selection: { anchor: newPos } })
+    return true
+  }
+
+  function tableNextCell(view: EditorView): boolean {
+    const { state } = view
+    const pos = state.selection.main.head
+    const line = state.doc.lineAt(pos)
+    if (!isTableLine(line.text) || isSeparatorLine(line.text)) return false
+    const afterCursor = line.text.slice(pos - line.from)
+    const nextPipe = afterCursor.indexOf('|', 1)
+    if (nextPipe !== -1) {
+      const newPos = pos + nextPipe + 1
+      const spaces = (line.text.slice(newPos - line.from).match(/^ */) ?? [''])[0].length
+      view.dispatch({ selection: { anchor: newPos + spaces } })
+      return true
+    }
+    // end of row: go to next non-separator row or insert
+    let nextNum = line.number + 1
+    while (nextNum <= state.doc.lines) {
+      const nl = state.doc.line(nextNum)
+      if (!isTableLine(nl.text)) break
+      if (!isSeparatorLine(nl.text)) {
+        const firstPipe = nl.text.indexOf('|') + 1
+        const spaces = (nl.text.slice(firstPipe).match(/^ */) ?? [''])[0].length
+        view.dispatch({ selection: { anchor: nl.from + firstPipe + spaces } })
+        return true
+      }
+      nextNum++
+    }
+    return tableInsertRow(view)
+  }
+
+  function tablePrevCell(view: EditorView): boolean {
+    const { state } = view
+    const pos = state.selection.main.head
+    const line = state.doc.lineAt(pos)
+    if (!isTableLine(line.text) || isSeparatorLine(line.text)) return false
+    const beforeCursor = line.text.slice(0, pos - line.from)
+    const pipes = [...beforeCursor.matchAll(/\|/g)].map((m) => m.index!)
+    if (pipes.length >= 2) {
+      const prevPipe = pipes[pipes.length - 2]
+      const cellStart = line.from + prevPipe + 1
+      const spaces = (line.text.slice(prevPipe + 1).match(/^ */) ?? [''])[0].length
+      view.dispatch({ selection: { anchor: cellStart + spaces } })
+      return true
+    }
+    // beginning of row: go to last cell of previous non-separator row
+    let prevNum = line.number - 1
+    while (prevNum >= 1) {
+      const pl = state.doc.line(prevNum)
+      if (!isTableLine(pl.text)) break
+      if (!isSeparatorLine(pl.text)) {
+        const lastPipe = pl.text.lastIndexOf('|', pl.text.length - 2)
+        if (lastPipe !== -1) {
+          const spaces = (pl.text.slice(lastPipe + 1).match(/^ */) ?? [''])[0].length
+          view.dispatch({ selection: { anchor: pl.from + lastPipe + 1 + spaces } })
+          return true
+        }
+      }
+      prevNum--
+    }
+    return false
+  }
+
+  function tableInsertRow(view: EditorView): boolean {
+    const { state } = view
+    const line = state.doc.lineAt(state.selection.main.head)
+    if (!isTableLine(line.text) || isSeparatorLine(line.text)) return false
+    const colCount = (line.text.match(/\|/g) ?? []).length - 1
+    const newRow = '\n|' + ' |'.repeat(colCount)
+    view.dispatch({
+      changes: { from: line.to, insert: newRow },
+      selection: { anchor: line.to + 2 },
+    })
+    return true
+  }
+
+  function tableKeymap(): Extension {
+    return Prec.highest(keymap.of([
+      { key: 'Tab', run: tableNextCell },
+      { key: 'Shift-Tab', run: tablePrevCell },
+      { key: 'Enter', run: tableInsertRow },
+    ]))
+  }
+
   function initEditor(el: HTMLDivElement): { destroy(): void } {
     const view = new EditorView({
       state: EditorState.create({
@@ -699,7 +834,7 @@
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           bracketMatching(),
           highlightActiveLine(),
-          ...(vimMode ? [vim()] : [keymap.of([...defaultKeymap, ...historyKeymap])]),
+          ...(vimMode ? [vim()] : [tableKeymap(), keymap.of([...defaultKeymap, ...historyKeymap])]),
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
@@ -1053,6 +1188,10 @@
     EventsOn('vault:note-changed', async (noteName: string) => {
       if (noteName !== currentNote) return
       const fresh = await ReadNote(noteName)
+      if (fresh === lastSelfSavedContent.get(noteName)) {
+        lastSelfSavedContent.delete(noteName)
+        return
+      }
       if (fresh === source) return
       source = fresh
       if (editorView) {
@@ -1256,7 +1395,7 @@
         <div class="editor-mount" use:initEditor></div>
       {/key}
     </div>
-    <div class="preview" class:full={viewMode === 'preview'} class:hidden={viewMode === 'editor'} bind:this={previewEl} on:scroll={onPreviewScroll}>
+    <div class="preview" class:full={viewMode === 'preview'} class:hidden={viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} bind:this={previewEl} on:scroll={onPreviewScroll}>
       {#if noteTags.length}
         <div class="note-tags">
           {#each noteTags as tag}
@@ -1496,8 +1635,21 @@
     cursor: col-resize;
   }
 
-  .resize-handle-v:hover {
-    background: var(--accent-hover);
+  .resize-handle-v::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 3px;
+    height: 40px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+
+  .resize-handle-v:hover::after {
+    background: var(--accent);
   }
 
   .resize-handle-h {
@@ -1509,8 +1661,21 @@
     z-index: 6;
   }
 
-  .resize-handle-h:hover {
-    background: var(--accent-hover);
+  .resize-handle-h::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 3px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+
+  .resize-handle-h:hover::after {
+    background: var(--accent);
   }
 
   .topbar {
@@ -1906,6 +2071,10 @@
     display: none;
   }
 
+  .preview.no-scroll {
+    overflow: hidden;
+  }
+
   .outline-panel {
     position: fixed;
     top: calc(2.5rem + 1px);
@@ -2166,6 +2335,7 @@
   .qs-list li {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 0.5rem;
     padding: 0.5rem 0.6rem;
     border-radius: 4px;
