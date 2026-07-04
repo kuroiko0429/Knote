@@ -684,6 +684,57 @@ func splitSections(content string) []string {
 // Bare terms match the note's path or content. Terms may be prefixed with
 // tag:, file:, path:, line:, or section: to scope the match; all terms must
 // match (AND) for a note to be included.
+// SearchHit is a single note result with matching snippets.
+type SearchHit struct {
+	Path     string   `json:"path"`
+	Snippets []string `json:"snippets"`
+}
+
+// SearchWithSnippets performs case-insensitive full-text search and returns
+// up to 3 matching line snippets per note.
+func (a *App) SearchWithSnippets(query string) []SearchHit {
+	if strings.TrimSpace(query) == "" {
+		return []SearchHit{}
+	}
+	ql := strings.ToLower(query)
+	var hits []SearchHit
+	_ = a.walkNotes(func(relPath string) error {
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
+		if err != nil {
+			return nil
+		}
+		var snippets []string
+		for _, line := range strings.Split(string(data), "\n") {
+			lower := strings.ToLower(line)
+			if !strings.Contains(lower, ql) {
+				continue
+			}
+			s := strings.TrimSpace(line)
+			if len(s) > 120 {
+				idx := strings.Index(strings.ToLower(s), ql)
+				start := idx - 40
+				if start < 0 {
+					start = 0
+				}
+				end := idx + len(query) + 60
+				if end > len(s) {
+					end = len(s)
+				}
+				s = "..." + s[start:end] + "..."
+			}
+			snippets = append(snippets, s)
+			if len(snippets) >= 3 {
+				break
+			}
+		}
+		if len(snippets) > 0 {
+			hits = append(hits, SearchHit{Path: relPath, Snippets: snippets})
+		}
+		return nil
+	})
+	return hits
+}
+
 func (a *App) SearchNotes(query string) ([]string, error) {
 	tokens := parseSearchQuery(query)
 	if len(tokens) == 0 {

@@ -68,6 +68,7 @@
     DeleteNote,
     RenameNote,
     SearchNotes,
+    SearchWithSnippets,
     GetVaultPath,
     SelectVault,
     GetBacklinks,
@@ -106,6 +107,8 @@
   let expanded = new Set<string>()
   let searchQuery = ''
   let searchTimer: ReturnType<typeof setTimeout>
+  let searchSeq = 0
+  let searchBusy = false
   let vaultPath = ''
   let templatesFolder = ''
   let dailyNoteFolder = ''
@@ -113,24 +116,16 @@
   let templateList: string[] = []
   let showTemplatePicker = false
   let searchInputEl: HTMLInputElement
-  let searchFocused = false
-  let searchBlurTimer: ReturnType<typeof setTimeout>
   const searchOperators = ['tag:', 'file:', 'path:', 'line:', 'section:']
+  let searchHits: { path: string; snippets: string[] }[] = []
+  const hasOperator = (q: string) => searchOperators.some((op) => q.includes(op))
 
-  function onSearchFocus(): void {
-    clearTimeout(searchBlurTimer)
-    searchFocused = true
+  function highlightQuery(text: string, query: string): string {
+    const safe = text.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+    const esc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return safe.replace(new RegExp(esc, 'gi'), '<mark>$&</mark>')
   }
 
-  function onSearchBlur(): void {
-    searchBlurTimer = setTimeout(() => (searchFocused = false), 150)
-  }
-
-  function insertSearchOperator(op: string): void {
-    searchQuery = searchQuery.trim() ? `${searchQuery.trim()} ${op}` : op
-    searchInputEl?.focus()
-    onSearchInput()
-  }
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
@@ -375,19 +370,41 @@
   }
 
   async function runSearch(): Promise<void> {
-    if (searchQuery.trim()) {
-      activeTag = null
-      visibleNotes = await SearchNotes(searchQuery)
-    } else if (activeTag) {
-      visibleNotes = await SearchByTag(activeTag)
-    } else {
-      visibleNotes = notes
+    if (searchBusy) return
+    searchBusy = true
+    const seq = ++searchSeq
+    const q = searchQuery.trim()
+    try {
+      let hits: { path: string; snippets: string[] }[] = []
+      let paths: string[] = []
+      if (q) {
+        activeTag = null
+        if (hasOperator(q)) {
+          paths = await SearchNotes(q)
+        } else {
+          hits = await SearchWithSnippets(q)
+          paths = hits.map((h) => h.path)
+        }
+      } else if (activeTag) {
+        paths = await SearchByTag(activeTag)
+      } else {
+        paths = notes
+      }
+      if (seq === searchSeq) {
+        searchHits = hits
+        visibleNotes = paths
+      }
+    } finally {
+      searchBusy = false
+      // if query changed while we were running, re-run once
+      if (seq !== searchSeq) runSearch()
     }
   }
 
   function onSearchInput(): void {
+    ++searchSeq
     clearTimeout(searchTimer)
-    searchTimer = setTimeout(runSearch, 200)
+    searchTimer = setTimeout(runSearch, 350)
   }
 
   async function selectTag(tag: string): Promise<void> {
@@ -1064,17 +1081,8 @@
         class="search"
         bind:value={searchQuery}
         on:input={onSearchInput}
-        on:focus={onSearchFocus}
-        on:blur={onSearchBlur}
         placeholder="search"
       />
-      {#if searchFocused}
-        <div class="search-hints">
-          {#each searchOperators as op}
-            <button on:click={() => insertSearchOperator(op)}>{op}</button>
-          {/each}
-        </div>
-      {/if}
     </div>
     <ul
       on:contextmenu={onSidebarContextMenu}
@@ -1083,34 +1091,20 @@
     >
       {#if isFiltering}
         {#each visibleNotes as path}
+          {@const hit = searchHits.find((h) => h.path === path)}
           <li
+            class="search-result"
             class:active={path === currentNote}
-            draggable="true"
-            on:dragstart={(e) => {
-              e.dataTransfer?.setData('text/plain', JSON.stringify({ path, type: 'note' }))
-              if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-            }}
-            on:dragover={(e) => e.preventDefault()}
-            on:drop={(e) => moveTo(dirname(path), e)}
+            on:click={() => openTab(path)}
             on:contextmenu={(e) => onNoteContextMenu(e, path)}
           >
-            {#if renamingPath === path && renamingType === 'note'}
-              <input
-                class="rename-input"
-                use:focusInput
-                bind:value={renameValue}
-                on:keydown={(e) => {
-                  if (e.key === 'Enter') confirmRename()
-                  if (e.key === 'Escape') cancelRename()
-                }}
-                on:blur={confirmRename}
-              />
-            {:else}
-              <span
-                class="note-name"
-                on:click={() => openTab(path)}
-                on:dblclick={() => startRename(path)}
-              >{path}</span>
+            <span class="note-name"><FileText size={13} />{path}</span>
+            {#if hit}
+              <ul class="snippets">
+                {#each hit.snippets as snippet}
+                  <li>{@html highlightQuery(snippet, searchQuery.trim())}</li>
+                {/each}
+              </ul>
             {/if}
           </li>
         {/each}
@@ -1617,36 +1611,6 @@
     pointer-events: none;
   }
 
-  .search-hints {
-    position: absolute;
-    top: calc(100% + 0.3rem);
-    left: 0;
-    right: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    padding: 0.4rem;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    z-index: 5;
-  }
-
-  .search-hints button {
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-dim);
-    border-radius: 10px;
-    padding: 0.1rem 0.5rem;
-    font-size: 0.7rem;
-    font-family: monospace;
-    cursor: pointer;
-  }
-
-  .search-hints button:hover {
-    color: var(--text);
-    border-color: var(--accent);
-  }
 
   .search {
     width: 100%;
@@ -1727,6 +1691,57 @@
     min-width: 0;
   }
 
+  .search-result {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 0.2rem;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .search-result:hover,
+  .search-result.active {
+    background: var(--bg-hover);
+  }
+
+  .search-result .note-name {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .snippets {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .snippets li {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+  }
+
+  .snippets :global(mark) {
+    background: rgba(255, 200, 0, 0.35);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
 
   .editor {
     grid-row: 3;
