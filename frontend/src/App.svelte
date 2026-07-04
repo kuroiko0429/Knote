@@ -84,6 +84,9 @@
     SetDailyNoteTemplate,
     ListTemplates,
     GetTemplateContent,
+    WriteTerminal,
+    StartTerminal,
+    PrepareRunFile,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -405,6 +408,31 @@
   async function render(): Promise<void> {
     html = await RenderMarkdown(source)
     await updateOutline()
+    applyCodeBlockButtons()
+  }
+
+  function applyCodeBlockButtons(): void {
+    if (!previewContentEl) return
+    for (const pre of Array.from(previewContentEl.querySelectorAll('pre')) as HTMLElement[]) {
+      const code = pre.querySelector('code')
+      if (!code) continue
+      pre.style.position = 'relative'
+      const btn = document.createElement('button')
+      btn.className = 'code-run-btn'
+      btn.textContent = '▶ run'
+      btn.title = 'ターミナルで実行'
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        const text = (code.textContent || '').trimEnd()
+        if (!text) return
+        const lang = (code.className || '').replace('language-', '').split(' ')[0]
+        showTerminal = true
+        await StartTerminal()
+        const cmd = await PrepareRunFile(lang, text)
+        WriteTerminal(cmd + '\n')
+      })
+      pre.appendChild(btn)
+    }
   }
 
   interface OutlineItem {
@@ -1814,6 +1842,31 @@
 
   .preview :global(a[href^='knote:']:hover) {
     text-decoration: underline;
+  }
+
+  .preview :global(.code-run-btn) {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    padding: 0.15rem 0.5rem;
+    background: rgba(0, 0, 0, 0.4);
+    color: #ccc;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-family: inherit;
+  }
+
+  .preview :global(pre:hover .code-run-btn) {
+    opacity: 1;
+  }
+
+  .preview :global(.code-run-btn:hover) {
+    background: rgba(80, 80, 80, 0.6);
+    color: #fff;
   }
 
   .preview :global(table) {

@@ -3,6 +3,7 @@ module knote-dev
 go 1.23.0
 
 require (
+	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/wailsapp/wails/v2 v2.12.0
@@ -13,7 +14,6 @@ require (
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
-	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect

@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
+	htmlstd "html"
 	"github.com/creack/pty"
 	"github.com/fsnotify/fsnotify"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -48,6 +50,24 @@ type appConfig struct {
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
 
+// langPreWrapper injects class="language-<lang>" onto the <code> element so the
+// frontend can detect the language for the run-button feature.
+type langPreWrapper struct{ lang string }
+
+func (p langPreWrapper) Start(code bool, styleAttr string) string {
+	if code {
+		return fmt.Sprintf(`<pre class="chroma"><code class="language-%s">`, htmlstd.EscapeString(p.lang))
+	}
+	return fmt.Sprintf(`<pre%s>`, styleAttr)
+}
+
+func (p langPreWrapper) End(code bool) string {
+	if code {
+		return `</code></pre>`
+	}
+	return `</pre>`
+}
+
 // NewApp creates a new App application struct
 func NewApp() *App {
 	md := goldmark.New(
@@ -56,6 +76,13 @@ func NewApp() *App {
 			extension.Footnote,
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("onedark"),
+				highlighting.WithCodeBlockOptions(func(ctx highlighting.CodeBlockContext) []chromahtml.Option {
+					lang, ok := ctx.Language()
+					if !ok {
+						return nil
+					}
+					return []chromahtml.Option{chromahtml.WithPreWrapper(langPreWrapper{lang: string(lang)})}
+				}),
 			),
 		),
 		goldmark.WithRendererOptions(
@@ -917,4 +944,37 @@ func (a *App) ResizeTerminal(cols int, rows int) {
 	if a.ptmx != nil {
 		pty.Setsize(a.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	}
+}
+
+// PrepareRunFile writes code to a private temp file and returns the shell command to run it.
+// This avoids glob expansion issues when sending multi-line code directly to the PTY.
+func (a *App) PrepareRunFile(lang, code string) string {
+	ext := ".sh"
+	runner := "bash"
+	switch strings.ToLower(lang) {
+	case "python", "python3", "py":
+		ext, runner = ".py", "python3"
+	case "javascript", "js":
+		ext, runner = ".js", "node"
+	case "typescript", "ts":
+		ext, runner = ".ts", "ts-node"
+	case "ruby", "rb":
+		ext, runner = ".rb", "ruby"
+	case "go":
+		ext, runner = ".go", "go run"
+	}
+	dir, err := os.MkdirTemp("", "knote_run_*")
+	if err != nil {
+		return ""
+	}
+	_ = os.Chmod(dir, 0o700)
+	tmpFile := filepath.Join(dir, "run"+ext)
+	f, err := os.OpenFile(tmpFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return ""
+	}
+	_, _ = f.WriteString(code + "\n")
+	f.Close()
+	quoted := "'" + strings.ReplaceAll(tmpFile, "'", `'\''`) + "'"
+	return runner + " " + quoted
 }
