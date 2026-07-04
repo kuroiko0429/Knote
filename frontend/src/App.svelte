@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import renderMathInElement from 'katex/contrib/auto-render'
+  import 'katex/dist/katex.min.css'
+  import mermaid from 'mermaid'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
   import { EditorState, EditorSelection, Prec } from '@codemirror/state'
@@ -493,8 +496,50 @@
 
   async function render(): Promise<void> {
     html = await RenderMarkdown(source)
+    await tick()
     await updateOutline()
     applyCodeBlockButtons()
+    applyMath()
+    await applyMermaid()
+  }
+
+  function applyMath(): void {
+    if (!previewContentEl) return
+    renderMathInElement(previewContentEl, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+      ],
+      throwOnError: false,
+    })
+  }
+
+  let mermaidInitialized = false
+
+  async function applyMermaid(): Promise<void> {
+    if (!previewContentEl) return
+    if (!mermaidInitialized) {
+      mermaid.initialize({ startOnLoad: false, theme: 'dark' })
+      mermaidInitialized = true
+    }
+    const blocks = Array.from(
+      previewContentEl.querySelectorAll('code.language-mermaid')
+    ) as HTMLElement[]
+    for (const code of blocks) {
+      const pre = code.parentElement
+      if (!pre || pre.dataset.mermaidRendered) continue
+      const source = code.textContent ?? ''
+      try {
+        const id = 'mermaid-' + Math.random().toString(36).slice(2)
+        const { svg } = await mermaid.render(id, source)
+        const wrapper = document.createElement('div')
+        wrapper.className = 'mermaid-diagram'
+        wrapper.innerHTML = svg
+        pre.replaceWith(wrapper)
+      } catch {
+        pre.dataset.mermaidRendered = 'error'
+      }
+    }
   }
 
   function applyCodeBlockButtons(): void {
@@ -2171,6 +2216,23 @@
 
   .preview :global(th) {
     background: var(--code-bg);
+  }
+
+  .preview :global(.mermaid-diagram) {
+    display: flex;
+    justify-content: center;
+    margin: 1rem 0;
+    overflow-x: auto;
+  }
+
+  .preview :global(.mermaid-diagram svg) {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .preview :global(.katex-display) {
+    overflow-x: auto;
+    padding: 0.5rem 0;
   }
 
   .backlinks {
