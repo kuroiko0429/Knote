@@ -1625,7 +1625,7 @@
                   Vimモード：{vimMode ? 'オン' : 'オフ'}
                 </button>
               </div>
-              <div class="settings-row">
+              <div class="settings-row settings-row-column">
                 <span class="settings-label">カスタムテーマ</span>
                 <select
                   class="settings-select"
@@ -1897,11 +1897,12 @@
 
   .sidebar {
     grid-column: 1;
-    grid-row: 3 / 5;
+    grid-row: 2 / 5;
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     min-height: 0;
+    overflow: hidden;
   }
 
   .tab-bar {
@@ -2404,7 +2405,7 @@
     flex-direction: column;
     border-top: 1px solid var(--border);
     border-left: 1px solid var(--border);
-    background: #1b2636;
+    background: var(--bg);
   }
 
   .terminal-panel.hidden {
@@ -2628,12 +2629,36 @@
 
   .settings-row input[type='text'],
   .settings-row select {
+    -webkit-appearance: none;
+    appearance: none;
     padding: 0.3rem 0.5rem;
-    background: var(--bg);
+    background: var(--bg-secondary) !important;
     border: 1px solid var(--border);
     border-radius: 4px;
-    color: var(--text);
+    color: var(--text) !important;
     font-size: 0.85rem;
+  }
+
+  .settings-row input[type='text']:focus,
+  .settings-row select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .settings-row > button:not(.settings-action) {
+    padding: 0.25rem 0.7rem;
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border: none;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .settings-row > button:not(.settings-action):hover {
+    background: var(--accent-hover);
+    color: var(--text);
   }
 
   .settings-action {
@@ -2661,14 +2686,26 @@
   }
 
   .settings-select {
+    -webkit-appearance: none;
+    appearance: none;
     width: 100%;
-    background: var(--bg);
-    color: var(--text);
+    background: var(--bg-secondary) !important;
+    color: var(--text) !important;
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0.35rem 0.5rem;
     font-size: 0.85rem;
     cursor: pointer;
+  }
+
+  .settings-select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .settings-row-column {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .settings-hint {
