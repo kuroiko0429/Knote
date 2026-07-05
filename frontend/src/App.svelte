@@ -77,6 +77,7 @@
     GetVaultPath,
     SelectVault,
     GetBacklinks,
+    GetBacklinksWithContext,
     GetGraph,
     GetTags,
     SearchByTag,
@@ -112,6 +113,9 @@
   let source = ''
   let html = ''
   let backlinks: string[] = []
+  interface BacklinkItem { note: string; snippets: string[] }
+  let backlinkItems: BacklinkItem[] = []
+  let showBacklinks = false
   let saveTimer: ReturnType<typeof setTimeout>
   let renamingPath: string | null = null
   let renamingType: 'note' | 'folder' | null = null
@@ -551,13 +555,38 @@
     await runSearch()
   }
 
+  let backlinkGen = 0
+  let backlinkLoading = false
+  let backlinkDebounce: ReturnType<typeof setTimeout>
+  async function loadBacklinks(name: string): Promise<void> {
+    if (backlinkLoading) return
+    backlinkLoading = true
+    const gen = ++backlinkGen
+    try {
+      const items = await GetBacklinksWithContext(name)
+      if (gen === backlinkGen) {
+        backlinkItems = items ?? []
+        backlinks = (items ?? []).map((i) => i.note)
+      }
+    } finally {
+      backlinkLoading = false
+      if (showBacklinks && currentNote && currentNote !== name) {
+        scheduleBacklinks(currentNote)
+      }
+    }
+  }
+  function scheduleBacklinks(name: string): void {
+    clearTimeout(backlinkDebounce)
+    backlinkDebounce = setTimeout(() => loadBacklinks(name), 400)
+  }
+
   async function selectNote(name: string): Promise<void> {
     source = await ReadNote(name)
     currentNote = name
     showKanban = isKanbanNote(source)
     await render()
-    backlinks = await GetBacklinks(name)
     noteTags = await GetTags(name)
+    if (showBacklinks) scheduleBacklinks(name)
   }
 
   async function openTab(path: string): Promise<void> {
@@ -587,6 +616,7 @@
       source = ''
       html = ''
       backlinks = []
+      backlinkItems = []
       noteTags = []
       outline = []
     }
@@ -1304,7 +1334,7 @@
     if (currentNote) {
       source = await ReadNote(currentNote)
       await render()
-      backlinks = await GetBacklinks(currentNote)
+      await loadBacklinks(currentNote)
       noteTags = await GetTags(currentNote)
     }
   }
@@ -1346,7 +1376,7 @@
     if (currentNote) {
       source = await ReadNote(currentNote)
       await render()
-      backlinks = await GetBacklinks(currentNote)
+      await loadBacklinks(currentNote)
       noteTags = await GetTags(currentNote)
     }
   }
@@ -1382,7 +1412,7 @@
     if (currentNote && !notes.includes(currentNote)) {
       clearCurrentNoteView()
     } else if (currentNote) {
-      backlinks = await GetBacklinks(currentNote)
+      await loadBacklinks(currentNote)
       noteTags = await GetTags(currentNote)
     }
   }
@@ -1461,6 +1491,10 @@
       {#if currentNote && !showGraph && !showKanban && viewMode !== 'editor'}
         <button on:click={() => (showOutline = !showOutline)} title="アウトライン" class:active={showOutline}>
           <AlignLeft size={16} />
+        </button>
+        <button on:click={() => { showBacklinks = !showBacklinks; if (showBacklinks && currentNote) scheduleBacklinks(currentNote) }} title="バックリンク" class:active={showBacklinks}>
+          <Link2 size={16} />
+          {#if backlinks.length}<span class="backlink-badge">{backlinks.length}</span>{/if}
         </button>
       {/if}
       <button on:click={openDailyNote} title="デイリーノート (Ctrl+D)"><Calendar size={16} /></button>
@@ -1621,29 +1655,7 @@
         </div>
       {/if}
       <div bind:this={previewContentEl} on:click={onPreviewClick}>{@html html}</div>
-      {#if backlinks.length}
-        <div class="backlinks">
-          <div class="backlinks-title"><Link2 size={13} /> バックリンク</div>
-          <ul>
-            {#each backlinks as name}
-              <li><span class="note-name" on:click={() => openTab(name)}>{name}</span></li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
     </div>
-    {#if showOutline && outline.length}
-      <div class="outline-panel">
-        <div class="outline-title"><AlignLeft size={13} /> アウトライン</div>
-        <ul>
-          {#each outline as item}
-            <li style="padding-left: {(item.level - 1) * 0.8}rem">
-              <span on:click={() => jumpToHeading(item)}>{item.text}</span>
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
   {/if}
@@ -1866,6 +1878,44 @@
     </div>
   {/if}
 </main>
+
+{#if showOutline && outline.length}
+  <div class="outline-panel">
+    <div class="outline-title"><AlignLeft size={13} /> アウトライン</div>
+    <ul>
+      {#each outline as item}
+        <li style="padding-left: {(item.level - 1) * 0.8}rem">
+          <span on:click={() => jumpToHeading(item)}>{item.text}</span>
+        </li>
+      {/each}
+    </ul>
+  </div>
+{/if}
+
+{#if showBacklinks && currentNote}
+  <div class="backlinks-panel" style={showOutline && outline.length ? 'right: 15rem' : ''}>
+    <div class="backlinks-panel-title"><Link2 size={13} /> バックリンク
+      <span class="backlinks-count">{backlinks.length}</span>
+      <button class="backlinks-close" on:click={() => (showBacklinks = false)}>×</button>
+    </div>
+    {#if backlinkItems.length === 0}
+      <div class="backlinks-empty">このノートへのリンクはありません</div>
+    {:else}
+      <ul class="backlinks-panel-list">
+        {#each backlinkItems as item}
+          <li class="backlinks-panel-item">
+            <button class="backlinks-note-btn" on:click={() => openTab(item.note)}>
+              <FileText size={12} />{item.note}
+            </button>
+            {#each item.snippets as snippet}
+              <div class="backlinks-snippet">{snippet}</div>
+            {/each}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
+{/if}
 
 {#if toast}
   <div class="toast">{toast}</div>
@@ -2384,6 +2434,7 @@
     position: fixed;
     top: calc(2.5rem + 1px);
     right: 0.6rem;
+    z-index: 8;
     width: 220px;
     max-height: 60vh;
     overflow-y: auto;
@@ -2505,33 +2556,114 @@
     border-bottom-style: solid;
   }
 
-  .backlinks {
-    margin-top: 2rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border);
+  .backlinks-panel {
+    position: fixed;
+    top: calc(2.5rem + 1px);
+    right: 0.6rem;
+    width: 240px;
+    max-height: 55vh;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    z-index: 8;
+    font-size: 0.82rem;
   }
 
-  .backlinks-title {
+  .backlinks-panel-title {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
-    font-size: 0.75rem;
-    opacity: 0.6;
-    margin-bottom: 0.4rem;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 0.5rem 0.75rem 0.35rem;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
   }
 
-  .backlinks ul {
+  .backlinks-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.1rem;
+  }
+  .backlinks-close:hover {
+    color: var(--text);
+  }
+
+  .backlinks-count {
+    background: var(--bg-hover);
+    border-radius: 10px;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.7rem;
+  }
+
+  .backlinks-empty {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    padding: 0.75rem;
+    text-align: center;
+  }
+
+  .backlinks-panel-list {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0.4rem 0;
   }
 
-  .backlinks li {
-    padding: 0.2rem 0;
+  .backlinks-panel-item {
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--border);
   }
 
-  .backlinks .note-name {
+  .backlinks-panel-item:last-child {
+    border-bottom: none;
+  }
+
+  .backlinks-note-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    background: none;
+    border: none;
     color: var(--accent);
+    font-size: 0.8rem;
+    padding: 0.15rem 0.75rem;
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .backlinks-note-btn:hover {
+    background: var(--bg-hover);
+  }
+
+  .backlinks-snippet {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    padding: 0.15rem 0.75rem 0.15rem 1.8rem;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .backlink-badge {
+    font-size: 0.65rem;
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border-radius: 8px;
+    padding: 0.05rem 0.3rem;
+    min-width: 1rem;
+    text-align: center;
   }
 
   .empty {

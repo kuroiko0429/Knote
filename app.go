@@ -855,6 +855,46 @@ func (a *App) GetBacklinks(name string) ([]string, error) {
 	return names, nil
 }
 
+// BacklinkItem holds a note path and the lines that reference the target.
+type BacklinkItem struct {
+	Note     string   `json:"note"`
+	Snippets []string `json:"snippets"`
+}
+
+// GetBacklinksWithContext returns backlinks with the surrounding context lines.
+func (a *App) GetBacklinksWithContext(name string) ([]BacklinkItem, error) {
+	pattern := regexp.MustCompile(`\[\[` + regexp.QuoteMeta(name) + `\]\]`)
+	items := []BacklinkItem{}
+	err := a.walkNotes(func(relPath string) error {
+		if relPath == name {
+			return nil
+		}
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
+		if err != nil {
+			return nil
+		}
+		snippets := []string{}
+		for _, line := range strings.Split(string(data), "\n") {
+			if pattern.MatchString(line) {
+				s := strings.TrimSpace(line)
+				if len(s) > 120 {
+					s = s[:120] + "…"
+				}
+				snippets = append(snippets, s)
+			}
+		}
+		if len(snippets) > 0 {
+			items = append(items, BacklinkItem{Note: relPath, Snippets: snippets})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Note < items[j].Note })
+	return items, nil
+}
+
 // GraphEdge is a single [[wikilink]] reference from one note to another
 type GraphEdge struct {
 	Source string `json:"source"`
