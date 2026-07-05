@@ -168,7 +168,6 @@
   let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
   let activeTag: string | null = null
   let noteTags: string[] = []
-  let viewMode: 'split' | 'editor' | 'preview' = 'split'
   let showSettings = false
   let themeList: string[] = []
   let activeTheme = ''
@@ -269,7 +268,7 @@
     { label: 'デイリーノートを開く', shortcut: 'Ctrl+D', action: openDailyNote },
     { label: `テーマを${theme === 'dark' ? 'ライト' : 'ダーク'}に切り替え`, action: toggleTheme },
     { label: `Vimモードを${vimMode ? '無効化' : '有効化'}`, action: toggleVim },
-    { label: `表示: ${viewMode === 'split' ? 'エディタのみ' : viewMode === 'editor' ? 'プレビューのみ' : '分割'}に切り替え`, shortcut: 'Ctrl+\\', action: () => { viewMode = viewMode === 'split' ? 'editor' : viewMode === 'editor' ? 'preview' : 'split' } },
+    { label: `表示: ${viewMode === 'split' ? 'エディタのみ' : viewMode === 'editor' ? 'プレビューのみ' : '分割'}に切り替え`, shortcut: 'Ctrl+\\', action: () => { viewMode = viewMode === 'split' ? 'editor' : viewMode === 'editor' ? 'preview' : 'split'; localStorage.setItem('knote-view', viewMode) } },
     { label: `ターミナルを${showTerminal ? '閉じる' : '開く'}`, shortcut: 'Ctrl+`', action: () => { showTerminal = !showTerminal } },
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
     { label: '設定を開く', action: async () => { showSettings = true; themeList = await ListThemes() } },
@@ -397,25 +396,22 @@
     requestAnimationFrame(() => terminalRef?.refreshTheme())
   }
 
-  let showTerminal = false
+  let showTerminal: boolean = localStorage.getItem('knote-terminal') === 'true'
 
   function toggleTerminal(): void {
     showTerminal = !showTerminal
+    localStorage.setItem('knote-terminal', String(showTerminal))
   }
 
   let mainEl: HTMLElement
   let terminalPanelEl: HTMLDivElement
-  let showSidebar = true
-  let sidebarWidth = 200
-  let editorWidth = 400
-  let terminalHeight = 260
+  let showSidebar: boolean = localStorage.getItem('knote-sidebar') !== 'false'
+  let sidebarWidth: number = Number(localStorage.getItem('knote-sidebar-w')) || 200
+  let editorWidth: number = Number(localStorage.getItem('knote-editor-w')) || 400
+  let terminalHeight: number = Number(localStorage.getItem('knote-terminal-h')) || 260
+  let viewMode: 'split' | 'editor' | 'preview' =
+    (localStorage.getItem('knote-view') as 'split' | 'editor' | 'preview' | null) ?? 'split'
   let dragging: 'sidebar' | 'editor' | 'terminal' | null = null
-
-  onMount(() => {
-    if (mainEl) {
-      editorWidth = Math.max(200, (mainEl.clientWidth - sidebarWidth) / 2)
-    }
-  })
 
   function startDrag(which: 'sidebar' | 'editor' | 'terminal', e: PointerEvent): void {
     dragging = which
@@ -438,6 +434,9 @@
   }
 
   function endDrag(): void {
+    if (dragging === 'sidebar') localStorage.setItem('knote-sidebar-w', String(sidebarWidth))
+    if (dragging === 'editor') localStorage.setItem('knote-editor-w', String(editorWidth))
+    if (dragging === 'terminal') localStorage.setItem('knote-terminal-h', String(terminalHeight))
     dragging = null
     document.body.style.userSelect = ''
   }
@@ -790,6 +789,7 @@
     } else if (e.key === 'b') {
       e.preventDefault()
       showSidebar = !showSidebar
+      localStorage.setItem('knote-sidebar', String(showSidebar))
     }
   }
 
@@ -1498,7 +1498,7 @@
 
 <main bind:this={mainEl} style="grid-template-columns: {showSidebar ? sidebarWidth : 0}px {editorWidth}px 1fr">
   <header class="topbar">
-    <button class="sidebar-toggle" on:click={() => (showSidebar = !showSidebar)} title="サイドバー (Ctrl+B)">
+    <button class="sidebar-toggle" on:click={() => { showSidebar = !showSidebar; localStorage.setItem('knote-sidebar', String(showSidebar)) }} title="サイドバー (Ctrl+B)">
       {#if showSidebar}<PanelLeftClose size={16} />{:else}<PanelLeftOpen size={16} />{/if}
     </button>
     <span class="app-title"><NotebookText size={16} /> Knote</span>
@@ -1508,17 +1508,17 @@
         <div class="view-mode-toggle">
           <button
             class:active={viewMode === 'editor'}
-            on:click={() => (viewMode = 'editor')}
+            on:click={() => { viewMode = 'editor'; localStorage.setItem('knote-view', 'editor') }}
             title="エディタのみ"
           ><PanelLeft size={15} /></button>
           <button
             class:active={viewMode === 'split'}
-            on:click={() => (viewMode = 'split')}
+            on:click={() => { viewMode = 'split'; localStorage.setItem('knote-view', 'split') }}
             title="分割表示"
           ><Columns2 size={15} /></button>
           <button
             class:active={viewMode === 'preview'}
-            on:click={() => (viewMode = 'preview')}
+            on:click={() => { viewMode = 'preview'; localStorage.setItem('knote-view', 'preview') }}
             title="プレビューのみ"
           ><PanelRight size={15} /></button>
         </div>
