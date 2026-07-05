@@ -537,8 +537,18 @@
   let sidebarWidth: number = Number(localStorage.getItem('knote-sidebar-w')) || 200
   let editorWidth: number = Number(localStorage.getItem('knote-editor-w')) || 400
   let terminalHeight: number = Number(localStorage.getItem('knote-terminal-h')) || 260
+  let compactMode: boolean = localStorage.getItem('knote-compact') === 'true'
   let viewMode: 'split' | 'editor' | 'preview' =
     (localStorage.getItem('knote-view') as 'split' | 'editor' | 'preview' | null) ?? 'split'
+
+  function toggleCompact(): void {
+    compactMode = !compactMode
+    localStorage.setItem('knote-compact', String(compactMode))
+    if (compactMode && viewMode === 'split') {
+      viewMode = 'editor'
+      localStorage.setItem('knote-view', 'editor')
+    }
+  }
   let dragging: 'sidebar' | 'editor' | 'terminal' | null = null
 
   function startDrag(which: 'sidebar' | 'editor' | 'terminal', e: PointerEvent): void {
@@ -1832,7 +1842,7 @@
   on:pointerup={endDrag}
 />
 
-<main bind:this={mainEl} style="grid-template-columns: {showSidebar ? sidebarWidth : 0}px min({editorWidth}px, calc(100% - {showSidebar ? sidebarWidth : 0}px - 180px)) minmax(180px, 1fr)">
+<main bind:this={mainEl} class:compact={compactMode} style="grid-template-columns: {showSidebar ? sidebarWidth : 0}px {compactMode ? '1fr 0' : `min(${editorWidth}px, calc(100% - ${showSidebar ? sidebarWidth : 0}px - 180px)) minmax(180px, 1fr)`}">
   <header class="topbar">
     <button class="sidebar-toggle" on:click={() => { showSidebar = !showSidebar; localStorage.setItem('knote-sidebar', String(showSidebar)) }} title="サイドバー (Ctrl+B)">
       {#if showSidebar}<PanelLeftClose size={16} />{:else}<PanelLeftOpen size={16} />{/if}
@@ -1840,23 +1850,33 @@
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
       {#if currentNote && !showGraph && !showKanban}
-        <div class="view-mode-toggle">
+        {#if compactMode}
           <button
-            class:active={viewMode === 'editor'}
-            on:click={() => { viewMode = 'editor'; localStorage.setItem('knote-view', 'editor') }}
-            title="エディタのみ"
-          ><PanelLeft size={15} /></button>
-          <button
-            class:active={viewMode === 'split'}
-            on:click={() => { viewMode = 'split'; localStorage.setItem('knote-view', 'split') }}
-            title="分割表示"
-          ><Columns2 size={15} /></button>
-          <button
-            class:active={viewMode === 'preview'}
-            on:click={() => { viewMode = 'preview'; localStorage.setItem('knote-view', 'preview') }}
-            title="プレビューのみ"
-          ><PanelRight size={15} /></button>
-        </div>
+            on:click={() => { viewMode = viewMode === 'editor' ? 'preview' : 'editor'; localStorage.setItem('knote-view', viewMode) }}
+            title="エディタ/プレビュー切り替え"
+            class="compact-panel-toggle"
+          >
+            {#if viewMode === 'editor'}<PanelRight size={15} />{:else}<PanelLeft size={15} />{/if}
+          </button>
+        {:else}
+          <div class="view-mode-toggle">
+            <button
+              class:active={viewMode === 'editor'}
+              on:click={() => { viewMode = 'editor'; localStorage.setItem('knote-view', 'editor') }}
+              title="エディタのみ"
+            ><PanelLeft size={15} /></button>
+            <button
+              class:active={viewMode === 'split'}
+              on:click={() => { viewMode = 'split'; localStorage.setItem('knote-view', 'split') }}
+              title="分割表示"
+            ><Columns2 size={15} /></button>
+            <button
+              class:active={viewMode === 'preview'}
+              on:click={() => { viewMode = 'preview'; localStorage.setItem('knote-view', 'preview') }}
+              title="プレビューのみ"
+            ><PanelRight size={15} /></button>
+          </div>
+        {/if}
       {/if}
       {#if currentNote && !showGraph && !showKanban && viewMode !== 'editor'}
         <button on:click={() => (showOutline = !showOutline)} title="アウトライン" class:active={showOutline}>
@@ -1978,7 +1998,7 @@
     on:pointerdown={(e) => startDrag('sidebar', e)}
   ></div>
   {/if}
-  {#if currentNote && !showGraph && !showKanban && viewMode === 'split'}
+  {#if currentNote && !showGraph && !showKanban && viewMode === 'split' && !compactMode}
     <div
       class="resize-handle resize-handle-v"
       style="left: {(showSidebar ? sidebarWidth : 0) + Math.min(editorWidth, windowWidth - (showSidebar ? sidebarWidth : 0) - 180) - 2}px"
@@ -2012,7 +2032,7 @@
       <Kanban {source} on:change={onKanbanChange} />
     </div>
   {:else if currentNote}
-    <div class="editor" class:full={viewMode === 'editor'} class:hidden={viewMode === 'preview'}>
+    <div class="editor" class:full={viewMode === 'editor' || compactMode} class:hidden={viewMode === 'preview' && !compactMode || compactMode && viewMode === 'preview'}>
       <div class="editor-toolbar">
         <button on:click={() => editorView && undo(editorView)} title="元に戻す"><Undo2 size={15} /></button>
         <button on:click={() => editorView && redo(editorView)} title="やり直す"><Redo2 size={15} /></button>
@@ -2055,7 +2075,7 @@
         <div class="editor-mount" use:initEditor></div>
       {/key}
     </div>
-    <div class="preview" class:full={viewMode === 'preview'} class:hidden={viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} bind:this={previewEl} on:scroll={onPreviewScroll}>
+    <div class="preview" class:full={viewMode === 'preview' || compactMode} class:hidden={viewMode === 'editor' && !compactMode || compactMode && viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} bind:this={previewEl} on:scroll={onPreviewScroll}>
       {#if noteTags.length}
         <div class="note-tags">
           {#each noteTags as tag}
@@ -2095,6 +2115,15 @@
     {/if}
     {#if breadcrumb}<span class="bottombar-path">{breadcrumb}</span>{/if}
     <div class="bottombar-right">
+      <button class="compact-toggle" class:active={compactMode} on:click={toggleCompact} title="コンパクトモード">
+        <Columns2 size={13} />
+      </button>
+      {#if compactMode && currentNote && !showGraph}
+        <div class="compact-tabs">
+          <button class:active={viewMode === 'editor'} on:click={() => { viewMode = 'editor'; localStorage.setItem('knote-view', 'editor') }}>Edit</button>
+          <button class:active={viewMode === 'preview'} on:click={() => { viewMode = 'preview'; localStorage.setItem('knote-view', 'preview') }}>Preview</button>
+        </div>
+      {/if}
       {#if saveStatus}
         <span class="save-status"><Check size={13} /> {saveStatus}</span>
       {/if}
@@ -4099,6 +4128,106 @@
   .bottombar-right button.active {
     color: var(--accent);
     opacity: 1;
+  }
+
+  /* compact toggle button */
+  .compact-toggle {
+    display: flex;
+    align-items: center;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+  }
+
+  .compact-toggle:hover { color: var(--text); }
+  .compact-toggle.active { color: var(--accent); }
+
+  /* compact bottom tabs */
+  .compact-tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-secondary);
+    border-radius: 5px;
+    padding: 2px;
+  }
+
+  .compact-tabs button {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: 3px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  .compact-tabs button.active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .compact-panel-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.25rem 0.4rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+  }
+
+  .compact-panel-toggle:hover { color: var(--text); background: var(--bg-hover); }
+
+  /* --- compact mode overrides --- */
+  main.compact .topbar {
+    min-height: 2rem;
+    padding: 0 0.4rem;
+  }
+
+  main.compact .topbar button {
+    padding: 0.2rem 0.3rem;
+  }
+
+  main.compact .app-title {
+    font-size: 0.78rem;
+  }
+
+  main.compact .sidebar {
+    font-size: 0.8rem;
+  }
+
+  main.compact .search-box {
+    padding: 0.3rem 0.5rem;
+  }
+
+  main.compact .search {
+    font-size: 0.78rem;
+  }
+
+  main.compact .tab-bar .tab {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.75rem;
+    gap: 0.25rem;
+  }
+
+  main.compact .preview {
+    padding: 1rem 1.2rem;
+    font-size: 0.9em;
+    line-height: 1.65;
+  }
+
+  main.compact .bottombar {
+    min-height: 1.6rem;
+    font-size: 0.72rem;
+  }
+
+  main.compact .note-stats {
+    font-size: 0.68rem;
   }
 
   .save-status {
