@@ -404,6 +404,7 @@
   }
 
   let mainEl: HTMLElement
+  let windowWidth = window.innerWidth
   let terminalPanelEl: HTMLDivElement
   let showSidebar: boolean = localStorage.getItem('knote-sidebar') !== 'false'
   let sidebarWidth: number = Number(localStorage.getItem('knote-sidebar-w')) || 200
@@ -1481,7 +1482,9 @@
     }
   }
 
+  const _onResize = () => { windowWidth = window.innerWidth }
   onMount(async () => {
+    window.addEventListener('resize', _onResize)
     vaultPath = await GetVaultPath()
     templatesFolder = await GetTemplatesFolder()
     dailyNoteFolder = await GetDailyNoteFolder()
@@ -1646,8 +1649,9 @@
   {#if currentNote && !showGraph && !showKanban && viewMode === 'split'}
     <div
       class="resize-handle resize-handle-v"
-      style="left: {(showSidebar ? sidebarWidth : 0) + editorWidth - 2}px"
+      style="left: {(showSidebar ? sidebarWidth : 0) + Math.min(editorWidth, windowWidth - (showSidebar ? sidebarWidth : 0) - 180) - 2}px"
       on:pointerdown={(e) => startDrag('editor', e)}
+      on:dblclick={() => { editorWidth = Math.floor((windowWidth - (showSidebar ? sidebarWidth : 0)) / 2); localStorage.setItem('knote-editor-w', String(editorWidth)) }}
     ></div>
   {/if}
 
@@ -2629,11 +2633,37 @@
   }
 
   .preview :global(input[type="checkbox"]) {
+    appearance: none;
+    -webkit-appearance: none;
     width: 1rem;
     height: 1rem;
-    margin-right: 0.3rem;
+    margin-right: 0.35rem;
     cursor: pointer;
     vertical-align: middle;
+    border: 1.5px solid var(--text-dim);
+    border-radius: 3px;
+    background: transparent;
+    position: relative;
+    flex-shrink: 0;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .preview :global(input[type="checkbox"]:checked) {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .preview :global(input[type="checkbox"]:checked::after) {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: -1px;
+    width: 5px;
+    height: 9px;
+    border: 2px solid var(--accent-contrast);
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
   }
 
   .preview :global(a[href^='knote:']) {
