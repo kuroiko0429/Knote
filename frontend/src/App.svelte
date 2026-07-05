@@ -4,8 +4,9 @@
   import 'katex/dist/katex.min.css'
   import mermaid from 'mermaid'
   import { EventsOn } from '../wailsjs/runtime/runtime'
-  import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap } from '@codemirror/view'
-  import { EditorState, EditorSelection, Prec } from '@codemirror/state'
+  import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap, ViewPlugin, Decoration, WidgetType } from '@codemirror/view'
+  import { EditorState, EditorSelection, Prec, RangeSetBuilder } from '@codemirror/state'
+  import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
   import { history, defaultKeymap, historyKeymap, undo, redo } from '@codemirror/commands'
   import { vim } from '@replit/codemirror-vim'
   import { markdown } from '@codemirror/lang-markdown'
@@ -208,9 +209,11 @@
   let qsQuery = ''
   let qsIndex = 0
   let qsInputEl: HTMLInputElement
+  let qsMode: 'normal' | 'rename' | 'newFolder' = 'normal'
+  let qsSubValue = ''
 
   type PaletteItem =
-    | { kind: 'cmd'; label: string; action: () => void }
+    | { kind: 'cmd'; label: string; shortcut?: string; action: () => void }
     | { kind: 'note'; path: string }
     | { kind: 'create'; path: string }
 
@@ -235,18 +238,23 @@
   }
 
   $: paletteCommands = [
-    { label: '新規ノートを作成', action: () => createNoteAt('') },
-    { label: 'デイリーノートを開く (Ctrl+D)', action: openDailyNote },
+    { label: '新規ノートを作成', shortcut: 'Ctrl+N', action: () => createNoteAt('') },
+    { label: '新規フォルダを作成', action: () => { qsMode = 'newFolder'; qsSubValue = ''; tick().then(() => qsInputEl?.focus()) } },
+    { label: 'デイリーノートを開く', shortcut: 'Ctrl+D', action: openDailyNote },
     { label: `テーマを${theme === 'dark' ? 'ライト' : 'ダーク'}に切り替え`, action: toggleTheme },
     { label: `Vimモードを${vimMode ? '無効化' : '有効化'}`, action: toggleVim },
-    { label: `表示: ${viewMode === 'split' ? 'エディタのみ' : viewMode === 'editor' ? 'プレビューのみ' : '分割'}に切り替え`, action: () => { viewMode = viewMode === 'split' ? 'editor' : viewMode === 'editor' ? 'preview' : 'split' } },
-    { label: `ターミナルを${showTerminal ? '閉じる' : '開く'}`, action: () => { showTerminal = !showTerminal } },
+    { label: `表示: ${viewMode === 'split' ? 'エディタのみ' : viewMode === 'editor' ? 'プレビューのみ' : '分割'}に切り替え`, shortcut: 'Ctrl+\\', action: () => { viewMode = viewMode === 'split' ? 'editor' : viewMode === 'editor' ? 'preview' : 'split' } },
+    { label: `ターミナルを${showTerminal ? '閉じる' : '開く'}`, shortcut: 'Ctrl+`', action: () => { showTerminal = !showTerminal } },
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
     { label: '設定を開く', action: async () => { showSettings = true; themeList = await ListThemes() } },
-    ...(currentNote ? [{ label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } }] : []),
-    { label: 'テーブルを整形 (Markdown)', action: () => { if (editorView) formatCurrentTable(editorView) } },
-    ...(currentNote ? [{ label: 'HTMLとしてエクスポート', action: doExportHTML }] : []),
-    ...(currentNote ? [{ label: 'PDFとしてエクスポート', action: doExportPDF }] : []),
+    ...(currentNote ? [
+      { label: `「${currentNote}」をリネーム`, action: () => { qsMode = 'rename'; qsSubValue = currentNote ?? ''; tick().then(() => qsInputEl?.focus()) } },
+      { label: `「${currentNote}」を削除`, action: () => { closeQuickSwitcher(); if (currentNote) deleteNote(currentNote) } },
+      { label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } },
+      { label: 'テーブルを整形', action: () => { if (editorView) formatCurrentTable(editorView) } },
+      { label: 'HTMLとしてエクスポート', action: doExportHTML },
+      { label: 'PDFとしてエクスポート', action: doExportPDF },
+    ] : []),
   ]
 
   $: paletteItems = (() => {
@@ -275,11 +283,14 @@
     showQuickSwitcher = true
     qsQuery = ''
     qsIndex = 0
+    qsMode = 'normal'
+    qsSubValue = ''
     tick().then(() => qsInputEl?.focus())
   }
 
   function closeQuickSwitcher(): void {
     showQuickSwitcher = false
+    qsMode = 'normal'
   }
 
   async function executeItem(item: PaletteItem): Promise<void> {
@@ -297,10 +308,41 @@
     }
   }
 
-  function onQsKeydown(e: KeyboardEvent): void {
+  async function onQsKeydown(e: KeyboardEvent): Promise<void> {
     if (e.key === 'Escape') {
       e.preventDefault()
+      if (qsMode !== 'normal') { qsMode = 'normal'; return }
       closeQuickSwitcher()
+    } else if (qsMode === 'rename') {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        const newName = qsSubValue.trim()
+        if (newName && currentNote && newName !== currentNote) {
+          closeQuickSwitcher()
+          await RenameNote(currentNote, newName)
+          await refreshList()
+          await openTab(newName)
+        } else {
+          closeQuickSwitcher()
+        }
+      }
+    } else if (qsMode === 'newFolder') {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        const name = qsSubValue.trim()
+        if (name) {
+          closeQuickSwitcher()
+          try {
+            await CreateFolder(name)
+            await refreshList()
+            showToast(`フォルダ「${name}」を作成しました`)
+          } catch (err) {
+            showToast(`フォルダ作成失敗: ${err}`)
+          }
+        } else {
+          closeQuickSwitcher()
+        }
+      }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()
       qsIndex = Math.min(qsIndex + 1, qsTotal - 1)
@@ -920,6 +962,71 @@
     ]))
   }
 
+  const wikilinkRe = /\[\[([^\]\[]+)\]\]/g
+
+  const wikilinkMark = Decoration.mark({ class: 'cm-wikilink' })
+
+  function wikilinkPlugin(openFn: (name: string) => void) {
+    return ViewPlugin.fromClass(
+      class {
+        decorations
+        constructor(view: EditorView) { this.decorations = this.build(view) }
+        update(update: any) { if (update.docChanged || update.viewportChanged) this.decorations = this.build(update.view) }
+        build(view: EditorView) {
+          const b = new RangeSetBuilder<Decoration>()
+          for (const { from, to } of view.visibleRanges) {
+            const text = view.state.doc.sliceString(from, to)
+            let m: RegExpExecArray | null
+            wikilinkRe.lastIndex = 0
+            while ((m = wikilinkRe.exec(text)) !== null) {
+              b.add(from + m.index, from + m.index + m[0].length, wikilinkMark)
+            }
+          }
+          return b.finish()
+        }
+      },
+      {
+        decorations: (v) => v.decorations,
+        eventHandlers: {
+          mousedown(e: MouseEvent, view: EditorView) {
+            if (!(e.ctrlKey || e.metaKey)) return
+            const pos = view.posAtCoords({ x: e.clientX, y: e.clientY })
+            if (pos == null) return
+            const line = view.state.doc.lineAt(pos)
+            const text = line.text
+            wikilinkRe.lastIndex = 0
+            let m: RegExpExecArray | null
+            while ((m = wikilinkRe.exec(text)) !== null) {
+              const start = line.from + m.index
+              const end = start + m[0].length
+              if (pos >= start && pos <= end) {
+                e.preventDefault()
+                openFn(m[1])
+                return
+              }
+            }
+          },
+        },
+      }
+    )
+  }
+
+  function wikilinkCompletion(getNotes: () => string[]) {
+    return autocompletion({
+      override: [
+        (ctx: CompletionContext) => {
+          const before = ctx.matchBefore(/\[\[[^\]]*/)
+          if (!before) return null
+          const query = before.text.slice(2).toLowerCase()
+          const options = getNotes()
+            .filter((n) => n.toLowerCase().includes(query))
+            .map((n) => ({ label: n, apply: `[[${n}]]`, type: 'keyword' }))
+          return { from: before.from, options, validFor: /^\[\[[^\]]*/ }
+        },
+      ],
+    })
+  }
+
   function initEditor(el: HTMLDivElement): { destroy(): void } {
     const view = new EditorView({
       state: EditorState.create({
@@ -939,6 +1046,8 @@
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
+          wikilinkPlugin((name) => openTab(name)),
+          wikilinkCompletion(() => notes),
           EditorView.domEventHandlers({
             paste(event, view) {
               const item = Array.from(event.clipboardData?.items ?? []).find((i) => i.type.startsWith('image/'))
@@ -1685,29 +1794,56 @@
   {#if showQuickSwitcher}
     <div class="modal-overlay qs-overlay" on:click={closeQuickSwitcher}>
       <div class="quick-switcher" on:click|stopPropagation>
-        <input
-          bind:this={qsInputEl}
-          bind:value={qsQuery}
-          on:keydown={onQsKeydown}
-          class="qs-input"
-          placeholder={qsQuery.startsWith('>') ? 'コマンドを検索...' : 'ノートを開く... (「>」でコマンド)'}
-        />
-        <ul class="qs-list">
-          {#each paletteItems as item, i}
-            <li class:active={i === qsIndex} on:click={() => executeItem(item)}>
-              {#if item.kind === 'cmd'}
-                <Code2 size={14} /><span class="qs-label">{item.label}</span>
-              {:else if item.kind === 'note'}
-                <FileText size={14} />{item.path}
-              {:else}
-                <FilePlus size={14} />新規ノートを作成: "{item.path}"
-              {/if}
-            </li>
-          {/each}
-          {#if paletteItems.length === 0}
-            <li class="qs-empty">一致する項目がありません</li>
-          {/if}
-        </ul>
+        {#if qsMode === 'rename'}
+          <div class="qs-mode-header"><Pencil size={13} /> リネーム</div>
+          <input
+            bind:this={qsInputEl}
+            bind:value={qsSubValue}
+            on:keydown={onQsKeydown}
+            class="qs-input"
+            placeholder="新しいノート名..."
+          />
+        {:else if qsMode === 'newFolder'}
+          <div class="qs-mode-header"><FolderPlus size={13} /> 新規フォルダ</div>
+          <input
+            bind:this={qsInputEl}
+            bind:value={qsSubValue}
+            on:keydown={onQsKeydown}
+            class="qs-input"
+            placeholder="フォルダ名..."
+          />
+        {:else}
+          <input
+            bind:this={qsInputEl}
+            bind:value={qsQuery}
+            on:keydown={onQsKeydown}
+            class="qs-input"
+            placeholder={qsQuery.startsWith('>') ? 'コマンドを検索...' : 'ノートを開く... (「>」でコマンド)'}
+          />
+          <ul class="qs-list">
+            {#if qsQuery.startsWith('>')}
+              <li class="qs-section">コマンド</li>
+            {:else if paletteItems.some(i => i.kind === 'note' || i.kind === 'create')}
+              <li class="qs-section">ノート</li>
+            {/if}
+            {#each paletteItems as item, i}
+              <li class:active={i === qsIndex} on:click={() => executeItem(item)}>
+                {#if item.kind === 'cmd'}
+                  <Code2 size={13} />
+                  <span class="qs-label">{item.label}</span>
+                  {#if item.shortcut}<span class="qs-shortcut">{item.shortcut}</span>{/if}
+                {:else if item.kind === 'note'}
+                  <FileText size={13} /><span class="qs-label">{item.path}</span>
+                {:else}
+                  <FilePlus size={13} /><span class="qs-label">新規作成: "{item.path}"</span>
+                {/if}
+              </li>
+            {/each}
+            {#if paletteItems.length === 0}
+              <li class="qs-empty">一致する項目がありません</li>
+            {/if}
+          </ul>
+        {/if}
       </div>
     </div>
   {/if}
@@ -2199,6 +2335,32 @@
     font-size: 1rem;
   }
 
+  .editor-mount :global(.cm-wikilink) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    cursor: pointer;
+  }
+
+  /* オートコンプリートのドロップダウン */
+  :global(.cm-tooltip-autocomplete) {
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+  }
+
+  :global(.cm-tooltip-autocomplete > ul > li) {
+    color: var(--text) !important;
+    padding: 0.25rem 0.6rem !important;
+    font-size: 0.85rem !important;
+  }
+
+  :global(.cm-tooltip-autocomplete > ul > li[aria-selected]) {
+    background: var(--accent) !important;
+    color: var(--accent-contrast) !important;
+  }
+
   .preview {
     grid-row: 3;
     padding: 1rem;
@@ -2331,6 +2493,16 @@
   .preview :global(.katex-display) {
     overflow-x: auto;
     padding: 0.5rem 0;
+  }
+
+  .preview :global(a[href^="knote:"]) {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--accent);
+  }
+
+  .preview :global(a[href^="knote:"]:hover) {
+    border-bottom-style: solid;
   }
 
   .backlinks {
@@ -2534,6 +2706,41 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .qs-shortcut {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .qs-section {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.4rem 0.6rem 0.2rem;
+    cursor: default;
+    border-top: 1px solid var(--border);
+  }
+
+  .qs-section:first-child {
+    border-top: none;
+  }
+
+  .qs-mode-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    padding: 0.5rem 0.8rem 0.2rem;
+    border-bottom: 1px solid var(--border);
   }
 
   .settings-modal {
