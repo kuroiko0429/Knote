@@ -152,6 +152,40 @@
     return safe.replace(new RegExp(esc, 'gi'), '<mark>$&</mark>')
   }
 
+  function fuzzyScore(query: string, str: string): number {
+    const q = query.toLowerCase()
+    const s = str.toLowerCase()
+    if (s === q) return 10000
+    if (s.startsWith(q)) return 9000 - s.length
+    if (s.includes(q)) return 8000 - s.length
+    let qi = 0, score = 0, consecutive = 0
+    for (let i = 0; i < s.length && qi < q.length; i++) {
+      if (s[i] === q[qi]) {
+        qi++; consecutive++
+        score += consecutive * 5
+        if (i === 0 || '/-_'.includes(s[i - 1])) score += 15
+      } else { consecutive = 0 }
+    }
+    return qi === q.length ? score : -1
+  }
+
+  function fuzzyHighlight(query: string, str: string): string {
+    const safe = str.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+    const q = query.toLowerCase(), s = str.toLowerCase()
+    if (s.includes(q)) {
+      const esc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      return safe.replace(new RegExp(esc, 'gi'), '<mark>$&</mark>')
+    }
+    let result = '', qi = 0
+    for (let i = 0; i < safe.length; i++) {
+      if (qi < q.length && s[i] === q[qi]) { result += `<mark>${safe[i]}</mark>`; qi++ }
+      else result += safe[i]
+    }
+    return result
+  }
+
+  let fuzzyNameHits = new Set<string>()
+
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let lastSelfSavedContent: Map<string, string> = new Map()
@@ -539,13 +573,25 @@
     try {
       let hits: { path: string; snippets: string[] }[] = []
       let paths: string[] = []
+      let nextFuzzyHits = new Set<string>()
       if (q) {
         activeTag = null
-        if (hasOperator(q)) {
+        if (q.startsWith('#')) {
+          const tag = q.slice(1)
+          paths = tag ? await SearchByTag(tag) : notes
+        } else if (hasOperator(q)) {
           paths = await SearchNotes(q)
         } else {
+          const base = (p: string) => { const i = p.lastIndexOf('/'); return i === -1 ? p : p.slice(i + 1) }
+          const fuzzyRanked = notes
+            .map(p => ({ path: p, score: Math.max(fuzzyScore(q, base(p)), fuzzyScore(q, p)) }))
+            .filter(m => m.score >= 0)
+            .sort((a, b) => b.score - a.score)
           hits = await SearchWithSnippets(q)
-          paths = hits.map((h) => h.path)
+          const contentSet = new Set(hits.map(h => h.path))
+          const fuzzyOnly = fuzzyRanked.filter(m => !contentSet.has(m.path)).map(m => m.path)
+          nextFuzzyHits = new Set(fuzzyRanked.map(m => m.path))
+          paths = [...fuzzyOnly, ...hits.map(h => h.path)]
         }
       } else if (activeTag) {
         paths = await SearchByTag(activeTag)
@@ -555,10 +601,10 @@
       if (seq === searchSeq) {
         searchHits = hits
         visibleNotes = paths
+        fuzzyNameHits = nextFuzzyHits
       }
     } finally {
       searchBusy = false
-      // if query changed while we were running, re-run once
       if (seq !== searchSeq) runSearch()
     }
   }
@@ -1597,17 +1643,28 @@
       {#if isFiltering}
         {#each visibleNotes as path}
           {@const hit = searchHits.find((h) => h.path === path)}
+          {@const q = searchQuery.trim()}
+          {@const base = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path}
+          {@const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) + ' / ' : ''}
           <li
             class="search-result"
             class:active={path === currentNote}
             on:click={() => openTab(path)}
             on:contextmenu={(e) => onNoteContextMenu(e, path)}
           >
-            <span class="note-name"><FileText size={13} />{path}</span>
+            <span class="note-name">
+              <FileText size={13} />
+              {#if dir}<span class="search-dir">{dir}</span>{/if}
+              {#if fuzzyNameHits.has(path) && !q.startsWith('#')}
+                {@html fuzzyHighlight(q, base)}
+              {:else}
+                {base}
+              {/if}
+            </span>
             {#if hit}
               <ul class="snippets">
                 {#each hit.snippets as snippet}
-                  <li>{@html highlightQuery(snippet, searchQuery.trim())}</li>
+                  <li>{@html highlightQuery(snippet, q)}</li>
                 {/each}
               </ul>
             {/if}
@@ -2406,6 +2463,19 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .search-dir {
+    font-weight: 400;
+    opacity: 0.5;
+    font-size: 0.78rem;
+  }
+
+  .search-result .note-name :global(mark) {
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border-radius: 2px;
+    padding: 0 1px;
   }
 
   .snippets {
