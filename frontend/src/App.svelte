@@ -1503,7 +1503,6 @@
     </button>
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
-      {#if breadcrumb}<span class="breadcrumb">{breadcrumb}</span>{/if}
       {#if currentNote && !showGraph && !showKanban}
         <div class="view-mode-toggle">
           <button
@@ -1718,6 +1717,7 @@
     <button class="settings-trigger" title="設定" on:click={async () => { showSettings = true; themeList = await ListThemes() }}>
       <Settings size={14} />
     </button>
+    {#if breadcrumb}<span class="bottombar-path">{breadcrumb}</span>{/if}
     <div class="bottombar-right">
       {#if saveStatus}
         <span class="save-status"><Check size={13} /> {saveStatus}</span>
@@ -2111,9 +2111,9 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    justify-content: space-between;
     padding: 0.4rem 0.8rem;
     border-bottom: 1px solid var(--border);
+    overflow: hidden;
   }
 
   .app-title {
@@ -2127,6 +2127,8 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
+    margin-left: auto;
+    flex-shrink: 0;
   }
 
   .topbar-right button {
@@ -2176,9 +2178,13 @@
     color: var(--accent-contrast);
   }
 
-  .breadcrumb {
-    font-size: 0.8rem;
-    opacity: 0.6;
+  .bottombar-path {
+    font-size: 0.75rem;
+    opacity: 0.55;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 30ch;
   }
 
   .sidebar {
@@ -2581,6 +2587,10 @@
     color: var(--accent);
   }
 
+  .preview :global(a) {
+    color: var(--link-color);
+  }
+
   .preview :global(a[href^='knote:']) {
     color: var(--accent);
     text-decoration: none;
@@ -2755,7 +2765,9 @@
     color: var(--text-dim);
     padding: 0.15rem 0.75rem 0.15rem 1.8rem;
     line-height: 1.4;
-    word-break: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .backlink-badge {

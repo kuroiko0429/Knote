@@ -25,7 +25,7 @@
   export let onDrop: (targetFolder: string, e: DragEvent) => void
   export let focusInputAction: (el: HTMLInputElement) => void
 
-  $: indent = `${depth * 0.9}rem`
+  $: indent = `${depth * 0.9 + 0.5}rem`
 
   let dragDepth = 0
   $: dragOver = dragDepth > 0

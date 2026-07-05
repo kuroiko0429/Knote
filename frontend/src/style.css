@@ -9,6 +9,7 @@
     --accent-hover: rgba(124, 158, 255, 0.2);
     --accent-contrast: #1b2636;
     --code-bg: rgba(255, 255, 255, 0.08);
+    --link-color: #7cb9ff;
 }
 
 [data-theme='light'] {
@@ -22,6 +23,7 @@
     --accent-hover: rgba(59, 95, 224, 0.15);
     --accent-contrast: #ffffff;
     --code-bg: rgba(0, 0, 0, 0.05);
+    --link-color: #1a5fc8;
 }
 
 html, body {
