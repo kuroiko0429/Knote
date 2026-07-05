@@ -645,13 +645,50 @@
     }
   }
 
+  let _keepScrollTop: number | null = null
+  let _skipEditorListener = false
+
   async function render(): Promise<void> {
     html = await RenderMarkdown(source)
     await tick()
+    if (_keepScrollTop !== null && previewEl) {
+      previewEl.scrollTop = _keepScrollTop
+      _keepScrollTop = null
+    }
     await updateOutline()
     applyCodeBlockButtons()
+    applyCheckboxes()
     applyMath()
     await applyMermaid()
+  }
+
+  function applyCheckboxes(): void {
+    if (!previewContentEl) return
+    const boxes = Array.from(previewContentEl.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[]
+    boxes.forEach((cb, idx) => {
+      cb.removeAttribute('disabled')
+      cb.addEventListener('click', (e) => {
+        e.preventDefault()
+        let count = 0
+        const newSource = source.replace(/^(\s*[-*+]\s+)\[([xX ])\]/gm, (match, prefix, state) => {
+          if (count++ === idx) return `${prefix}[${state.trim() === '' ? 'x' : ' '}]`
+          return match
+        })
+        if (newSource === source) return
+        source = newSource
+        _keepScrollTop = previewEl?.scrollTop ?? 0
+        lastEditorScroll = Date.now()
+        lastPreviewScroll = Date.now()
+        if (editorView) {
+          _skipEditorListener = true
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: source },
+          })
+          _skipEditorListener = false
+        }
+        onEdit()
+      })
+    })
   }
 
   function applyMath(): void {
@@ -1130,7 +1167,7 @@
             },
           }),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
+            if (update.docChanged && !_skipEditorListener) {
               source = update.state.doc.toString()
               onEdit()
             }
@@ -2589,6 +2626,14 @@
 
   .preview :global(a) {
     color: var(--link-color);
+  }
+
+  .preview :global(input[type="checkbox"]) {
+    width: 1rem;
+    height: 1rem;
+    margin-right: 0.3rem;
+    cursor: pointer;
+    vertical-align: middle;
   }
 
   .preview :global(a[href^='knote:']) {
