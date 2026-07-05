@@ -113,6 +113,7 @@
     GetPreviewFontSize,
     SetPreviewFontSize,
     GetTagCounts,
+    QueryNotes,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -713,6 +714,7 @@
     applyCheckboxes()
     applyMath()
     await applyMermaid()
+    await applyDataview()
   }
 
   function applyCheckboxes(): void {
@@ -780,6 +782,84 @@
       } catch {
         pre.dataset.mermaidRendered = 'error'
       }
+    }
+  }
+
+  function dvEscape(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+  }
+
+  async function applyDataview(): Promise<void> {
+    if (!previewContentEl) return
+    const blocks = Array.from(
+      previewContentEl.querySelectorAll('pre > code.language-dataview')
+    ) as HTMLElement[]
+    for (const code of blocks) {
+      const pre = code.parentElement!
+      const query = code.textContent ?? ''
+      const result = await QueryNotes(query)
+
+      const container = document.createElement('div')
+      container.className = 'dataview-result'
+
+      if (result.error) {
+        container.innerHTML = `<div class="dataview-error">${dvEscape(result.error)}</div>`
+      } else if (result.mode === 'table') {
+        const cols = result.columns?.length ? result.columns : ['file.name']
+        let out = '<table class="dataview-table"><thead><tr>'
+        for (const col of cols) {
+          out += `<th>${dvEscape(col)}</th>`
+        }
+        out += '</tr></thead><tbody>'
+        for (const row of result.rows ?? []) {
+          out += '<tr>'
+          for (const col of cols) {
+            const val = row[col] ?? ''
+            if (col === 'file' || col === 'file.name') {
+              const fp = row['file'] ?? ''
+              const name = row['file.name'] ?? fp
+              out += `<td><a class="dv-link" data-path="${dvEscape(fp)}">${dvEscape(name)}</a></td>`
+            } else {
+              out += `<td>${dvEscape(val)}</td>`
+            }
+          }
+          out += '</tr>'
+        }
+        out += '</tbody></table>'
+        if ((result.rows?.length ?? 0) === 0) {
+          out += '<div class="dataview-empty">該当なし</div>'
+        }
+        container.innerHTML = out
+      } else {
+        // LIST
+        let out = '<ul class="dataview-list">'
+        for (const row of result.rows ?? []) {
+          const fp = row['file'] ?? ''
+          const name = row['file.name'] ?? fp
+          out += `<li><a class="dv-link" data-path="${dvEscape(fp)}">${dvEscape(name)}</a></li>`
+        }
+        out += '</ul>'
+        if ((result.rows?.length ?? 0) === 0) {
+          out += '<div class="dataview-empty">該当なし</div>'
+        }
+        container.innerHTML = out
+      }
+
+      // wire up note links
+      for (const a of Array.from(container.querySelectorAll('a.dv-link')) as HTMLAnchorElement[]) {
+        const p = a.dataset.path ?? ''
+        a.addEventListener('click', (e) => {
+          e.preventDefault()
+          if (p) openTab(p.replace(/\.md$/, ''))
+        })
+      }
+
+      pre.replaceWith(container)
     }
   }
 
@@ -2839,6 +2919,77 @@
 
   .preview :global(a) {
     color: var(--link-color);
+  }
+
+  .preview :global(.dataview-result) {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 1rem 0;
+    font-size: 0.875rem;
+  }
+
+  .preview :global(.dataview-table) {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .preview :global(.dataview-table th) {
+    background: var(--bg-secondary);
+    padding: 0.35rem 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .preview :global(.dataview-table td) {
+    padding: 0.35rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .preview :global(.dataview-table tr:last-child td) {
+    border-bottom: none;
+  }
+
+  .preview :global(.dataview-table tbody tr:hover td) {
+    background: var(--bg-hover);
+  }
+
+  .preview :global(.dataview-list) {
+    list-style: none;
+    margin: 0;
+    padding: 0.4rem 0.75rem;
+  }
+
+  .preview :global(.dataview-list li) {
+    padding: 0.2rem 0;
+  }
+
+  .preview :global(.dv-link) {
+    color: var(--link-color);
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .preview :global(.dv-link:hover) {
+    text-decoration: underline;
+  }
+
+  .preview :global(.dataview-empty) {
+    padding: 0.5rem 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+
+  .preview :global(.dataview-error) {
+    padding: 0.5rem 0.75rem;
+    color: #e06c75;
+    font-size: 0.85rem;
   }
 
   .preview :global(input[type="checkbox"]) {
