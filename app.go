@@ -36,6 +36,10 @@ type App struct {
 	templatesFolder   string
 	dailyNoteFolder   string
 	dailyNoteTemplate string
+	fontFamily        string
+	fontSize          int
+	previewFontFamily string
+	previewFontSize   int
 	watcher           *fsnotify.Watcher
 	ptmx              *os.File
 	shellCmd          *exec.Cmd
@@ -47,6 +51,10 @@ type appConfig struct {
 	DailyNoteFolder   string `json:"dailyNoteFolder"`
 	DailyNoteTemplate string `json:"dailyNoteTemplate"`
 	ActiveTheme       string `json:"activeTheme"`
+	FontFamily        string `json:"fontFamily"`
+	FontSize          int    `json:"fontSize"`
+	PreviewFontFamily string `json:"previewFontFamily"`
+	PreviewFontSize   int    `json:"previewFontSize"`
 }
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
@@ -117,6 +125,10 @@ func (a *App) startup(ctx context.Context) {
 		a.dailyNoteFolder = "daily"
 	}
 	a.dailyNoteTemplate = cfg.DailyNoteTemplate
+	a.fontFamily = cfg.FontFamily
+	a.fontSize = cfg.FontSize
+	a.previewFontFamily = cfg.PreviewFontFamily
+	a.previewFontSize = cfg.PreviewFontSize
 
 	os.MkdirAll(a.vaultPath, 0755)
 	a.startWatcher()
@@ -257,6 +269,10 @@ func (a *App) saveConfig() error {
 		TemplatesFolder:   a.templatesFolder,
 		DailyNoteFolder:   a.dailyNoteFolder,
 		DailyNoteTemplate: a.dailyNoteTemplate,
+		FontFamily:        a.fontFamily,
+		FontSize:          a.fontSize,
+		PreviewFontFamily: a.previewFontFamily,
+		PreviewFontSize:   a.previewFontSize,
 	})
 	if err != nil {
 		return err
@@ -300,6 +316,32 @@ func (a *App) GetDailyNoteTemplate() string {
 // SetDailyNoteTemplate updates the template used for new daily notes
 func (a *App) SetDailyNoteTemplate(name string) error {
 	a.dailyNoteTemplate = name
+	return a.saveConfig()
+}
+
+func (a *App) GetFontFamily() string { return a.fontFamily }
+func (a *App) GetFontSize() int      { return a.fontSize }
+
+func (a *App) SetFontFamily(family string) error {
+	a.fontFamily = family
+	return a.saveConfig()
+}
+
+func (a *App) SetFontSize(size int) error {
+	a.fontSize = size
+	return a.saveConfig()
+}
+
+func (a *App) GetPreviewFontFamily() string { return a.previewFontFamily }
+func (a *App) GetPreviewFontSize() int      { return a.previewFontSize }
+
+func (a *App) SetPreviewFontFamily(family string) error {
+	a.previewFontFamily = family
+	return a.saveConfig()
+}
+
+func (a *App) SetPreviewFontSize(size int) error {
+	a.previewFontSize = size
 	return a.saveConfig()
 }
 

@@ -103,6 +103,14 @@
     GetActiveTheme,
     SetActiveTheme,
     GetThemeDir,
+    GetFontFamily,
+    SetFontFamily,
+    GetFontSize,
+    SetFontSize,
+    GetPreviewFontFamily,
+    SetPreviewFontFamily,
+    GetPreviewFontSize,
+    SetPreviewFontSize,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -165,6 +173,18 @@
   let themeList: string[] = []
   let activeTheme = ''
   let themeStyleEl: HTMLStyleElement | null = null
+  let fontFamily = ''
+  let fontSize = 0
+  let previewFontFamily = ''
+  let previewFontSize = 0
+
+  function applyFont(): void {
+    const el = document.documentElement
+    el.style.setProperty('--editor-font', fontFamily || 'inherit')
+    el.style.setProperty('--editor-font-size', fontSize > 0 ? `${fontSize}px` : '14px')
+    el.style.setProperty('--preview-font', previewFontFamily || 'inherit')
+    el.style.setProperty('--preview-font-size', previewFontSize > 0 ? `${previewFontSize}px` : '15px')
+  }
   let terminalRef: { refreshTheme: () => void } | null = null
 
   async function applyTheme(name: string) {
@@ -1432,6 +1452,11 @@
     themeList = await ListThemes()
     const saved = await GetActiveTheme()
     if (saved) await applyTheme(saved)
+    fontFamily = await GetFontFamily()
+    fontSize = await GetFontSize()
+    previewFontFamily = await GetPreviewFontFamily()
+    previewFontSize = await GetPreviewFontSize()
+    applyFont()
     await loadTemplateList()
     await refreshList()
     EventsOn('vault:changed', onVaultChanged)
@@ -1773,6 +1798,53 @@
               </div>
               <div class="settings-row settings-hint">
                 テーマ CSS を <code>{vaultPath}/.knote/theme/</code> に配置
+              </div>
+              <div class="settings-font-section">
+                <div class="settings-font-header">
+                  <span class="settings-label">エディタ</span>
+                  <button class="settings-sync-btn" on:click={async () => {
+                    previewFontFamily = fontFamily
+                    previewFontSize = fontSize
+                    await SetPreviewFontFamily(previewFontFamily)
+                    await SetPreviewFontSize(previewFontSize)
+                    applyFont()
+                  }}>プレビューに同期</button>
+                </div>
+                <div class="settings-row settings-row-column">
+                  <span class="settings-label">フォント名</span>
+                  <input type="text" class="settings-input" placeholder="例: Noto Sans JP, monospace"
+                    bind:value={fontFamily}
+                    on:change={async () => { await SetFontFamily(fontFamily); applyFont() }} />
+                </div>
+                <div class="settings-row settings-row-column">
+                  <span class="settings-label">サイズ</span>
+                  <div class="settings-range-row">
+                    <input type="range" min="10" max="24" step="1" bind:value={fontSize}
+                      on:input={() => applyFont()}
+                      on:change={async () => { await SetFontSize(fontSize); applyFont() }} />
+                    <span>{fontSize || 14}px</span>
+                  </div>
+                </div>
+              </div>
+              <div class="settings-font-section">
+                <div class="settings-font-header">
+                  <span class="settings-label">プレビュー</span>
+                </div>
+                <div class="settings-row settings-row-column">
+                  <span class="settings-label">フォント名</span>
+                  <input type="text" class="settings-input" placeholder="例: Noto Sans JP, sans-serif"
+                    bind:value={previewFontFamily}
+                    on:change={async () => { await SetPreviewFontFamily(previewFontFamily); applyFont() }} />
+                </div>
+                <div class="settings-row settings-row-column">
+                  <span class="settings-label">サイズ</span>
+                  <div class="settings-range-row">
+                    <input type="range" min="10" max="24" step="1" bind:value={previewFontSize}
+                      on:input={() => applyFont()}
+                      on:change={async () => { await SetPreviewFontSize(previewFontSize); applyFont() }} />
+                    <span>{previewFontSize || 15}px</span>
+                  </div>
+                </div>
               </div>
             {:else if settingsCategory === 'templates'}
               <h3>テンプレート</h3>
@@ -2444,6 +2516,8 @@
     padding: 1rem;
     overflow-y: auto;
     border-left: 1px solid var(--border);
+    font-family: var(--preview-font, inherit);
+    font-size: var(--preview-font-size, 15px);
   }
 
   .preview.full {
@@ -3066,6 +3140,64 @@
   }
 
   .settings-select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .settings-font-section {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .settings-font-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+    font-size: 0.82rem;
+  }
+  .settings-sync-btn {
+    background: var(--accent);
+    color: var(--accent-contrast);
+    border: none;
+    border-radius: 4px;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .settings-sync-btn:hover {
+    opacity: 0.85;
+  }
+  .settings-range-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+  }
+  .settings-range-row input[type="range"] {
+    flex: 1;
+  }
+  .settings-range-row span {
+    min-width: 2.5rem;
+    text-align: right;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+  }
+
+  .settings-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    background: var(--bg-secondary) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+  }
+  .settings-input:focus {
     outline: none;
     border-color: var(--accent);
   }

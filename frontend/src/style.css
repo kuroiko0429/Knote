@@ -48,6 +48,8 @@ body {
 }
 .cm-content {
     caret-color: var(--text) !important;
+    font-family: var(--editor-font, inherit) !important;
+    font-size: var(--editor-font-size, 14px) !important;
 }
 .cm-gutters {
     background: var(--bg-secondary) !important;
