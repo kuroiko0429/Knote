@@ -1533,7 +1533,7 @@
   on:pointerup={endDrag}
 />
 
-<main bind:this={mainEl} style="grid-template-columns: {showSidebar ? sidebarWidth : 0}px {editorWidth}px 1fr">
+<main bind:this={mainEl} style="grid-template-columns: {showSidebar ? sidebarWidth : 0}px min({editorWidth}px, calc(100% - {showSidebar ? sidebarWidth : 0}px - 180px)) minmax(180px, 1fr)">
   <header class="topbar">
     <button class="sidebar-toggle" on:click={() => { showSidebar = !showSidebar; localStorage.setItem('knote-sidebar', String(showSidebar)) }} title="サイドバー (Ctrl+B)">
       {#if showSidebar}<PanelLeftClose size={16} />{:else}<PanelLeftOpen size={16} />{/if}
