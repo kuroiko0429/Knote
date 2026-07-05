@@ -7,7 +7,7 @@
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap, ViewPlugin, Decoration, WidgetType } from '@codemirror/view'
   import { EditorState, EditorSelection, Prec, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
   import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
-  import { history, defaultKeymap, historyKeymap, undo, redo } from '@codemirror/commands'
+  import { history, defaultKeymap, historyKeymap, undo, redo, indentMore } from '@codemirror/commands'
   import { vim, Vim, getCM } from '@replit/codemirror-vim'
   import { markdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
@@ -114,6 +114,8 @@
     SetPreviewFontSize,
     GetTagCounts,
     QueryNotes,
+    GetSnippets,
+    SaveSnippets,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -203,6 +205,8 @@
   }
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
+  interface SnippetDef { trigger: string; name: string; content: string }
+  let snippets: SnippetDef[] = []
   let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
   let vimModeLabel = 'NORMAL'
 
@@ -350,7 +354,9 @@
     SaveNote(currentNote!, source)
     lastSelfSavedContent.set(currentNote!, source)
   }
-  let settingsCategory: 'general' | 'appearance' | 'templates' = 'general'
+  let settingsCategory: 'general' | 'appearance' | 'templates' | 'snippets' = 'general'
+  let editingSnippet: SnippetDef | null = null
+  let newSnippet: SnippetDef = { trigger: '', name: '', content: '' }
   let showQuickSwitcher = false
   let qsQuery = ''
   let qsIndex = 0
@@ -636,6 +642,7 @@
     await runSearch()
     if (showGraph) graphEdges = (await GetGraph()).edges
     tagCounts = await GetTagCounts()
+    snippets = await GetSnippets()
   }
 
   async function toggleGraph(): Promise<void> {
@@ -1077,11 +1084,57 @@
     templateList = await ListTemplates()
   }
 
+  function expandVars(content: string, noteName?: string): { text: string; cursorOffset: number | null } {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`
+    let text = content
+      .replace(/\{\{date\}\}/g, todayDateString())
+      .replace(/\{\{time\}\}/g, time)
+      .replace(/\{\{title\}\}/g, noteName ?? (currentNote ? basename(currentNote) : ''))
+    const cursorIdx = text.indexOf('{{cursor}}')
+    text = text.replace(/\{\{cursor\}\}/g, '')
+    return { text, cursorOffset: cursorIdx >= 0 ? cursorIdx : null }
+  }
+
   async function insertTemplate(name: string): Promise<void> {
     showTemplatePicker = false
     if (!editorView) return
-    const content = (await GetTemplateContent(name)).split('{{date}}').join(todayDateString())
-    insertAtCursor(content)
+    const raw = await GetTemplateContent(name)
+    const { text, cursorOffset } = expandVars(raw)
+    const from = editorView.state.selection.main.from
+    editorView.dispatch({
+      changes: { from, to: editorView.state.selection.main.to, insert: text },
+      selection: cursorOffset !== null
+        ? EditorSelection.cursor(from + cursorOffset)
+        : EditorSelection.cursor(from + text.length),
+    })
+    editorView.focus()
+    source = editorView.state.doc.toString()
+    onEdit()
+  }
+
+  function doSnippetExpand(view: EditorView): boolean {
+    if (snippets.length === 0) return false
+    const sel = view.state.selection.main
+    if (!sel.empty) return false
+    const line = view.state.doc.lineAt(sel.head)
+    const textBefore = line.text.slice(0, sel.head - line.from)
+    const sorted = [...snippets].sort((a, b) => b.trigger.length - a.trigger.length)
+    for (const snip of sorted) {
+      if (snip.trigger && textBefore.endsWith(snip.trigger)) {
+        const from = sel.head - snip.trigger.length
+        const { text, cursorOffset } = expandVars(snip.content)
+        view.dispatch({
+          changes: { from, to: sel.head, insert: text },
+          selection: cursorOffset !== null
+            ? EditorSelection.cursor(from + cursorOffset)
+            : EditorSelection.cursor(from + text.length),
+        })
+        return true
+      }
+    }
+    return false
   }
 
   const livePreviewStyle = HighlightStyle.define([
@@ -1351,7 +1404,8 @@
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           bracketMatching(),
           highlightActiveLine(),
-          ...(vimMode ? [vim(), vimModeField] : [tableKeymap(), keymap.of([...defaultKeymap, ...historyKeymap])]),
+          Prec.highest(keymap.of([{ key: 'Tab', run: doSnippetExpand }])),
+          ...(vimMode ? [vim(), vimModeField] : [tableKeymap(), keymap.of([...defaultKeymap, ...historyKeymap, { key: 'Tab', run: indentMore }])]),
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
@@ -2083,6 +2137,10 @@
               class:active={settingsCategory === 'templates'}
               on:click={() => (settingsCategory = 'templates')}
             >テンプレート</button>
+            <button
+              class:active={settingsCategory === 'snippets'}
+              on:click={() => (settingsCategory = 'snippets')}
+            >スニペット</button>
           </nav>
           <div class="settings-content">
             {#if settingsCategory === 'general'}
@@ -2201,7 +2259,49 @@
                   {/each}
                 </select>
               </div>
-              <p class="settings-hint">テンプレート内の <code>{'{{date}}'}</code> は挿入時に日付へ置き換わる</p>
+              <p class="settings-hint">使える変数: <code>{'{{date}}'}</code> <code>{'{{time}}'}</code> <code>{'{{title}}'}</code> <code>{'{{cursor}}'}</code></p>
+            {:else if settingsCategory === 'snippets'}
+              <h3>スニペット</h3>
+              <p class="settings-hint">エディタでトリガーを入力して Tab を押すと展開。変数: <code>{'{{date}}'}</code> <code>{'{{time}}'}</code> <code>{'{{title}}'}</code> <code>{'{{cursor}}'}</code></p>
+              <table class="snippet-table">
+                <thead><tr><th>トリガー</th><th>名前</th><th>内容</th><th></th></tr></thead>
+                <tbody>
+                  {#each snippets as snip, i}
+                    <tr>
+                      {#if editingSnippet === snip}
+                        <td><input type="text" bind:value={snip.trigger} /></td>
+                        <td><input type="text" bind:value={snip.name} /></td>
+                        <td><textarea rows="6" bind:value={snip.content}></textarea></td>
+                        <td>
+                          <button on:click={async () => { editingSnippet = null; await SaveSnippets(snippets); snippets = await GetSnippets() }}>保存</button>
+                          <button on:click={() => { editingSnippet = null }}>キャンセル</button>
+                        </td>
+                      {:else}
+                        <td><code>{snip.trigger}</code></td>
+                        <td>{snip.name}</td>
+                        <td class="snippet-preview">{snip.content.slice(0, 40)}{snip.content.length > 40 ? '…' : ''}</td>
+                        <td>
+                          <button on:click={() => { editingSnippet = snip }}>編集</button>
+                          <button on:click={async () => { snippets = snippets.filter((_, j) => j !== i); await SaveSnippets(snippets) }}>削除</button>
+                        </td>
+                      {/if}
+                    </tr>
+                  {/each}
+                  <tr class="snippet-new-row">
+                    <td><input type="text" placeholder="トリガー" bind:value={newSnippet.trigger} /></td>
+                    <td><input type="text" placeholder="名前" bind:value={newSnippet.name} /></td>
+                    <td><textarea rows="6" placeholder={"内容（{{cursor}}でカーソル位置指定）"} bind:value={newSnippet.content}></textarea></td>
+                    <td>
+                      <button on:click={async () => {
+                        if (!newSnippet.trigger || !newSnippet.content) return
+                        snippets = [...snippets, { ...newSnippet }]
+                        newSnippet = { trigger: '', name: '', content: '' }
+                        await SaveSnippets(snippets)
+                      }}>追加</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             {/if}
           </div>
         </div>
@@ -2968,11 +3068,13 @@
 
   .preview {
     grid-row: 3;
-    padding: 1rem;
+    padding: 1.5rem 2rem;
     overflow-y: auto;
     border-left: 1px solid var(--border);
     font-family: var(--preview-font, inherit);
     font-size: var(--preview-font-size, 15px);
+    line-height: 1.8;
+    color: var(--text);
   }
 
   .preview.full {
@@ -3034,6 +3136,122 @@
 
   .outline-panel li span:hover {
     color: var(--accent);
+  }
+
+  /* --- preview typography --- */
+
+  .preview :global(p) {
+    margin: 0 0 1rem 0;
+  }
+
+  .preview :global(h1),
+  .preview :global(h2),
+  .preview :global(h3),
+  .preview :global(h4),
+  .preview :global(h5),
+  .preview :global(h6) {
+    line-height: 1.3;
+    font-weight: 700;
+    margin: 1.75rem 0 0.6rem 0;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  .preview :global(h1) { font-size: 1.75em; margin-top: 0; }
+  .preview :global(h2) { font-size: 1.35em; }
+  .preview :global(h3) { font-size: 1.15em; }
+  .preview :global(h4) { font-size: 1.0em; }
+  .preview :global(h5) { font-size: 0.9em; color: var(--text-dim); }
+  .preview :global(h6) { font-size: 0.85em; color: var(--text-dim); }
+
+  .preview :global(ul),
+  .preview :global(ol) {
+    padding-left: 1.6rem;
+    margin: 0 0 1rem 0;
+  }
+
+  .preview :global(li) {
+    margin: 0.25rem 0;
+    line-height: 1.7;
+  }
+
+  .preview :global(li > ul),
+  .preview :global(li > ol) {
+    margin: 0.15rem 0 0.15rem 0;
+  }
+
+  .preview :global(blockquote) {
+    border-left: 3px solid var(--accent);
+    margin: 1rem 0;
+    padding: 0.3rem 0 0.3rem 1rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .preview :global(blockquote p) {
+    margin: 0;
+  }
+
+  .preview :global(code) {
+    font-family: var(--editor-font, 'JetBrains Mono', 'Fira Code', monospace);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+  }
+
+  .preview :global(pre) {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    margin: 0 0 1rem 0;
+    line-height: 1.6;
+  }
+
+  .preview :global(pre code) {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+    font-size: 0.85em;
+  }
+
+  .preview :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.75rem 0;
+  }
+
+  .preview :global(table) {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0 0 1rem 0;
+    font-size: 0.9em;
+  }
+
+  .preview :global(th) {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--border);
+  }
+
+  .preview :global(td) {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border);
+  }
+
+  .preview :global(tr:nth-child(even) td) {
+    background: var(--bg-secondary);
+  }
+
+  .preview :global(img) {
+    max-width: 100%;
+    border-radius: 4px;
+    display: block;
+    margin: 0.5rem 0;
   }
 
   .preview :global(a) {
@@ -3545,10 +3763,10 @@
 
   .settings-modal {
     position: relative;
-    width: 640px;
-    max-width: 90vw;
-    height: 440px;
-    max-height: 80vh;
+    width: 800px;
+    max-width: 92vw;
+    height: 580px;
+    max-height: 88vh;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -3787,6 +4005,67 @@
     padding: 0.1rem 0.3rem;
     border-radius: 3px;
     word-break: break-all;
+  }
+
+  .snippet-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+  }
+
+  .snippet-table th {
+    text-align: left;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .snippet-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .snippet-table input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.8rem;
+  }
+
+  .snippet-table textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.8rem;
+    font-family: monospace;
+    resize: vertical;
+  }
+
+  .snippet-preview {
+    color: var(--text-dim);
+    font-family: monospace;
+    font-size: 0.75rem;
+    white-space: pre;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .snippet-new-row td {
+    background: var(--bg-hover);
   }
 
   .bottombar-right {
