@@ -112,6 +112,7 @@
     SetPreviewFontFamily,
     GetPreviewFontSize,
     SetPreviewFontSize,
+    GetTagCounts,
   } from '../wailsjs/go/main/App.js'
 
   let notes: string[] = []
@@ -203,6 +204,8 @@
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
   let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
   let activeTag: string | null = null
+  let tagCounts: { tag: string; count: number }[] = []
+  let showTagPanel = false
   let noteTags: string[] = []
   let showSettings = false
   let themeList: string[] = []
@@ -550,6 +553,7 @@
     folders = await ListFolders()
     await runSearch()
     if (showGraph) graphEdges = (await GetGraph()).edges
+    tagCounts = await GetTagCounts()
   }
 
   async function toggleGraph(): Promise<void> {
@@ -1711,6 +1715,31 @@
         {/each}
       {/if}
     </ul>
+
+    {#if tagCounts.length > 0}
+      <div class="tag-panel">
+        <button class="tag-panel-header" on:click={() => showTagPanel = !showTagPanel}>
+          <Tag size={13} />
+          <span>タグ</span>
+          <span class="tag-panel-chevron">{showTagPanel ? '▲' : '▼'}</span>
+        </button>
+        {#if showTagPanel}
+          <div class="tag-cloud">
+            {#each tagCounts as { tag, count }}
+              {@const maxCount = tagCounts[0].count}
+              {@const size = 11 + Math.round((count / maxCount) * 6)}
+              <button
+                class="tag-cloud-chip"
+                class:active={activeTag === tag}
+                style="font-size:{size}px"
+                on:click={() => selectTag(tag)}
+                title="{tag} ({count})"
+              >{tag} <span class="tag-count">{count}</span></button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </nav>
 
   {#if showSidebar}
@@ -2434,6 +2463,71 @@
 
   .tag-chip:hover {
     color: var(--text);
+  }
+
+  .tag-panel {
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .tag-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .tag-panel-header:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+
+  .tag-panel-chevron {
+    margin-left: auto;
+    font-size: 0.6rem;
+  }
+
+  .tag-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    padding: 0.4rem 0.75rem 0.6rem;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .tag-cloud-chip {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 10px;
+    padding: 0.1rem 0.45rem;
+    cursor: pointer;
+    line-height: 1.5;
+    transition: background 0.1s;
+  }
+
+  .tag-cloud-chip:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .tag-cloud-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .tag-count {
+    font-size: 0.65em;
+    opacity: 0.7;
   }
 
   .note-tags {

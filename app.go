@@ -58,6 +58,7 @@ type appConfig struct {
 }
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
+var imageWikilinkPattern = regexp.MustCompile(`!\[\[([^\]\[]+)\]\]`)
 
 // langPreWrapper injects class="language-<lang>" onto the <code> element so the
 // frontend can detect the language for the run-button feature.
@@ -430,8 +431,39 @@ func parseFrontmatter(content string) ([]string, string) {
 // Any leading YAML frontmatter is stripped from the rendered output. Local
 // image references are inlined as base64 data URIs so they render correctly
 // inside the webview regardless of asset-serving restrictions.
+func (a *App) resolveImagePath(name string) string {
+	if isImageExt(strings.ToLower(filepath.Ext(name))) {
+		direct := filepath.Join(a.vaultPath, filepath.FromSlash(name))
+		if _, err := os.Stat(direct); err == nil {
+			return filepath.ToSlash(name)
+		}
+		var found string
+		_ = filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if filepath.Base(path) == filepath.Base(name) && isImageExt(strings.ToLower(filepath.Ext(path))) {
+				rel, _ := filepath.Rel(a.vaultPath, path)
+				found = filepath.ToSlash(rel)
+				return fs.SkipAll
+			}
+			return nil
+		})
+		return found
+	}
+	return ""
+}
+
 func (a *App) RenderMarkdown(src string) string {
 	_, body := parseFrontmatter(src)
+	body = imageWikilinkPattern.ReplaceAllStringFunc(body, func(match string) string {
+		inner := imageWikilinkPattern.FindStringSubmatch(match)[1]
+		resolved := a.resolveImagePath(inner)
+		if resolved == "" {
+			return match
+		}
+		return fmt.Sprintf("![%s](%s)", filepath.Base(inner), resolved)
+	})
 	body = wikilinkPattern.ReplaceAllString(body, "[$1](<knote:$1>)")
 
 	var buf bytes.Buffer
@@ -574,6 +606,42 @@ func (a *App) ListAllTags() ([]string, error) {
 	}
 	sort.Strings(tags)
 	return tags, nil
+}
+
+// TagCount holds a tag and how many notes use it.
+type TagCount struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
+// GetTagCounts returns every tag in the vault with its note count, sorted by count desc then name asc.
+func (a *App) GetTagCounts() ([]TagCount, error) {
+	counts := map[string]int{}
+	err := a.walkNotes(func(relPath string) error {
+		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
+		if err != nil {
+			return nil
+		}
+		tags, _ := parseFrontmatter(string(data))
+		for _, t := range tags {
+			counts[t]++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]TagCount, 0, len(counts))
+	for t, c := range counts {
+		result = append(result, TagCount{Tag: t, Count: c})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Count != result[j].Count {
+			return result[i].Count > result[j].Count
+		}
+		return result[i].Tag < result[j].Tag
+	})
+	return result, nil
 }
 
 // SearchByTag returns the paths of notes whose frontmatter contains the given tag
