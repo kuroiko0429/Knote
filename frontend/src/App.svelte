@@ -265,7 +265,7 @@
       const cmdQ = ql.slice(1).trim()
       for (const cmd of paletteCommands) {
         if (!cmdQ || cmd.label.toLowerCase().includes(cmdQ)) {
-          items.push({ kind: 'cmd', label: cmd.label, action: cmd.action })
+          items.push({ kind: 'cmd', label: cmd.label, shortcut: cmd.shortcut, action: cmd.action })
         }
       }
     } else {
