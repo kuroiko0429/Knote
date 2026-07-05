@@ -5,10 +5,10 @@
   import mermaid from 'mermaid'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap, ViewPlugin, Decoration, WidgetType } from '@codemirror/view'
-  import { EditorState, EditorSelection, Prec, RangeSetBuilder } from '@codemirror/state'
+  import { EditorState, EditorSelection, Prec, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
   import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
   import { history, defaultKeymap, historyKeymap, undo, redo } from '@codemirror/commands'
-  import { vim } from '@replit/codemirror-vim'
+  import { vim, Vim, getCM } from '@replit/codemirror-vim'
   import { markdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
@@ -204,6 +204,87 @@
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
   let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
+  let vimModeLabel = 'NORMAL'
+
+  // StateEffect/Field for vim mode — lets relativeLineNumbers read mode from CM state
+  const vimModeEffect = StateEffect.define<string>()
+  const vimModeField = StateField.define<string>({
+    create: () => 'normal',
+    update: (val, tr) => {
+      for (const e of tr.effects) if (e.is(vimModeEffect)) return e.value
+      return val
+    },
+  })
+
+  let _vimBindingsSetup = false
+
+  function setupVimGlobal(): void {
+    if (_vimBindingsSetup) return
+    _vimBindingsSetup = true
+
+    // insert: jk → Esc
+    Vim.map('jk', '<Esc>', 'insert')
+
+    // Space leader mappings in normal mode
+    Vim.defineEx('knotesave', '', () => forceSave())
+    Vim.defineEx('knoteclose', '', () => { if (currentNote) closeTab(currentNote) })
+    Vim.defineEx('knotesearch', '', () => { setTimeout(() => searchInputEl?.focus(), 50) })
+    Vim.defineEx('knotenext', '', () => {
+      if (!currentNote) return
+      const i = openTabs.indexOf(currentNote)
+      const next = openTabs[i + 1] ?? openTabs[0]
+      if (next) openTab(next)
+    })
+    Vim.defineEx('knoteprev', '', () => {
+      if (!currentNote) return
+      const i = openTabs.indexOf(currentNote)
+      const prev = openTabs[i - 1] ?? openTabs[openTabs.length - 1]
+      if (prev) openTab(prev)
+    })
+
+    // Standard vim ex commands
+    Vim.defineEx('w', '', () => forceSave())
+    Vim.defineEx('q', '', () => { if (currentNote) closeTab(currentNote) })
+    Vim.defineEx('wq', '', () => { forceSave(); if (currentNote) closeTab(currentNote) })
+    Vim.defineEx('wa', '', () => forceSave())
+    Vim.defineEx('tabn', '', () => {
+      if (!currentNote) return
+      const i = openTabs.indexOf(currentNote)
+      const next = openTabs[i + 1] ?? openTabs[0]
+      if (next) openTab(next)
+    })
+    Vim.defineEx('tabp', '', () => {
+      if (!currentNote) return
+      const i = openTabs.indexOf(currentNote)
+      const prev = openTabs[i - 1] ?? openTabs[openTabs.length - 1]
+      if (prev) openTab(prev)
+    })
+    Vim.defineEx('e', '', (_cm, params) => {
+      const name = params.argString.trim()
+      if (!name) return
+      const match = notes.find((n) => n === name || n.endsWith('/' + name) || n.endsWith('/' + name + '.md') || n === name + '.md')
+      if (match) openTab(match)
+    })
+
+    Vim.map('<Space>w', ':w<CR>', 'normal')
+    Vim.map('<Space>q', ':q<CR>', 'normal')
+    Vim.map('<Space>e', ':knotesearch<CR>', 'normal')
+    Vim.map('gt', ':tabn<CR>', 'normal')
+    Vim.map('gT', ':tabp<CR>', 'normal')
+  }
+
+  function relativeLineNumbers() {
+    return lineNumbers({
+      formatNumber(lineNo, state) {
+        if (!vimMode) return String(lineNo)
+        const mode = state.field(vimModeField, false) ?? 'normal'
+        if (mode === 'insert') return String(lineNo)
+        const curLine = state.doc.lineAt(state.selection.main.head).number
+        const rel = Math.abs(lineNo - curLine)
+        return rel === 0 ? String(lineNo) : String(rel)
+      },
+    })
+  }
   let activeTag: string | null = null
   let tagCounts: { tag: string; count: number }[] = []
   let showTagPanel = false
@@ -1255,11 +1336,12 @@
   }
 
   function initEditor(el: HTMLDivElement): { destroy(): void } {
+    if (vimMode) setupVimGlobal()
     const view = new EditorView({
       state: EditorState.create({
         doc: source,
         extensions: [
-          lineNumbers(),
+          relativeLineNumbers(),
           highlightSpecialChars(),
           history(),
           drawSelection(),
@@ -1269,7 +1351,7 @@
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           bracketMatching(),
           highlightActiveLine(),
-          ...(vimMode ? [vim()] : [tableKeymap(), keymap.of([...defaultKeymap, ...historyKeymap])]),
+          ...(vimMode ? [vim(), vimModeField] : [tableKeymap(), keymap.of([...defaultKeymap, ...historyKeymap])]),
           markdown({ codeLanguages: languages }),
           ...(theme === 'dark' ? [oneDark] : []),
           syntaxHighlighting(livePreviewStyle),
@@ -1317,6 +1399,19 @@
       const ratio = view.scrollDOM.scrollTop / Math.max(1, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)
       previewEl.scrollTop = ratio * Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
     })
+    if (vimMode) {
+      const cm = getCM(view)
+      if (cm) {
+        cm.on('vim-mode-change', ({ mode, subMode }: { mode: string; subMode?: string }) => {
+          if (mode === 'visual') {
+            vimModeLabel = subMode === 'linewise' ? 'V-LINE' : subMode === 'blockwise' ? 'V-BLOCK' : 'VISUAL'
+          } else {
+            vimModeLabel = mode.toUpperCase()
+          }
+          view.dispatch({ effects: vimModeEffect.of(mode) })
+        })
+      }
+    }
     return {
       destroy() {
         view.destroy()
@@ -1941,6 +2036,9 @@
     <button class="settings-trigger" title="設定" on:click={async () => { showSettings = true; themeList = await ListThemes() }}>
       <Settings size={14} />
     </button>
+    {#if vimMode}
+      <span class="vim-mode-indicator" class:vim-insert={vimModeLabel === 'INSERT'} class:vim-visual={vimModeLabel.startsWith('V')}>{vimModeLabel}</span>
+    {/if}
     {#if breadcrumb}<span class="bottombar-path">{breadcrumb}</span>{/if}
     <div class="bottombar-right">
       {#if saveStatus}
@@ -2437,6 +2535,27 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 30ch;
+  }
+
+  .vim-mode-indicator {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    background: var(--accent);
+    color: var(--accent-contrast);
+    flex-shrink: 0;
+  }
+
+  .vim-mode-indicator.vim-insert {
+    background: #98bb6a;
+    color: #1a1a2e;
+  }
+
+  .vim-mode-indicator.vim-visual {
+    background: #e6c384;
+    color: #1a1a2e;
   }
 
   .sidebar {
