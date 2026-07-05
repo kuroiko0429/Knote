@@ -62,6 +62,7 @@
     Redo2,
     Calendar,
     FileStack,
+    FolderInput,
   } from 'lucide-svelte'
   import {
     RenderMarkdown,
@@ -141,6 +142,7 @@
   let dailyNoteTemplate = ''
   let templateList: string[] = []
   let showTemplatePicker = false
+  let moveTargetNote: string | null = null
   let searchInputEl: HTMLInputElement
   const searchOperators = ['tag:', 'file:', 'path:', 'line:', 'section:']
   let searchHits: { path: string; snippets: string[] }[] = []
@@ -1450,6 +1452,21 @@
     }
   }
 
+  async function moveNoteTo(notePath: string, destFolder: string): Promise<void> {
+    moveTargetNote = null
+    const name = basename(notePath)
+    const newPath = destFolder ? `${destFolder}/${name}` : name
+    if (newPath === notePath) return
+    await RenameNote(notePath, newPath)
+    openTabs = openTabs.map((p) => (p === notePath ? newPath : p))
+    if (currentNote === notePath) currentNote = newPath
+    await refreshList()
+    if (currentNote === newPath) {
+      source = await ReadNote(newPath)
+      await render()
+    }
+  }
+
   async function moveTo(targetFolder: string, e: DragEvent): Promise<void> {
     e.preventDefault()
     e.stopPropagation()
@@ -2051,6 +2068,7 @@
         {@const path = contextMenu.path}
         <button on:click={() => createNoteAt(dirname(path))}><FilePlus size={14} /> 新規ノート</button>
         <button on:click={() => { closeContextMenu(); startRename(path) }}><Pencil size={14} /> 名前を変更</button>
+        <button on:click={() => { closeContextMenu(); moveTargetNote = path }}><FolderInput size={14} /> 移動...</button>
         <button on:click={() => { closeContextMenu(); deleteNote(path) }}><Trash2 size={14} /> 削除</button>
       {:else if contextMenu.type === 'folder' && contextMenu.path}
         {@const path = contextMenu.path}
@@ -2101,6 +2119,33 @@
 
 {#if toast}
   <div class="toast">{toast}</div>
+{/if}
+
+{#if moveTargetNote}
+  {@const _mtn = moveTargetNote}
+  <div class="modal-overlay" on:click={() => (moveTargetNote = null)}>
+    <div class="move-modal" on:click|stopPropagation>
+      <div class="move-modal-title"><FolderInput size={15} /> 移動先を選択</div>
+      <div class="move-modal-note">{_mtn}</div>
+      <ul class="move-folder-list">
+        <li>
+          <button class="move-folder-btn" on:click={() => moveNoteTo(_mtn, '')}>
+            <span class="move-folder-icon">🏠</span> ルート
+          </button>
+        </li>
+        {#each folders as folder}
+          {@const isCurrent = dirname(_mtn) === folder}
+          <li>
+            <button class="move-folder-btn" class:move-current={isCurrent}
+              on:click={() => moveNoteTo(_mtn, folder)}>
+              <span class="move-folder-icon">📁</span> {folder}
+            </button>
+          </li>
+        {/each}
+      </ul>
+      <button class="move-cancel" on:click={() => (moveTargetNote = null)}>キャンセル</button>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -3435,6 +3480,81 @@
     max-width: 400px;
     word-break: break-all;
   }
+
+  .move-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.2rem;
+    width: 320px;
+    max-height: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  .move-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .move-modal-note {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 0.3rem 0.5rem;
+    background: var(--bg);
+    border-radius: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .move-folder-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .move-folder-btn {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .move-folder-btn:hover { background: var(--bg-hover); }
+  .move-folder-btn.move-current { opacity: 0.4; cursor: default; }
+  .move-folder-icon { font-size: 0.9rem; }
+
+  .move-cancel {
+    align-self: flex-end;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 0.3rem 0.8rem;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+
+  .move-cancel:hover { background: var(--bg-hover); }
 
   .context-menu {
     position: fixed;
