@@ -45,6 +45,8 @@
     Quote,
     Columns2,
     PanelLeft,
+    PanelLeftClose,
+    PanelLeftOpen,
     PanelRight,
     Settings,
     FileText,
@@ -383,6 +385,7 @@
 
   let mainEl: HTMLElement
   let terminalPanelEl: HTMLDivElement
+  let showSidebar = true
   let sidebarWidth = 200
   let editorWidth = 400
   let terminalHeight = 260
@@ -405,8 +408,9 @@
     if (dragging === 'sidebar') {
       sidebarWidth = Math.max(140, Math.min(480, e.clientX))
     } else if (dragging === 'editor') {
-      const maxEditor = mainEl.clientWidth - sidebarWidth - 200
-      editorWidth = Math.max(200, Math.min(maxEditor, e.clientX - sidebarWidth))
+      const sw = showSidebar ? sidebarWidth : 0
+      const maxEditor = mainEl.clientWidth - sw - 200
+      editorWidth = Math.max(200, Math.min(maxEditor, e.clientX - sw))
     } else if (dragging === 'terminal' && terminalPanelEl) {
       const rect = terminalPanelEl.getBoundingClientRect()
       terminalHeight = Math.max(120, Math.min(600, rect.bottom - e.clientY))
@@ -763,6 +767,9 @@
     } else if (e.key === 'd') {
       e.preventDefault()
       openDailyNote()
+    } else if (e.key === 'b') {
+      e.preventDefault()
+      showSidebar = !showSidebar
     }
   }
 
@@ -1464,8 +1471,11 @@
   on:pointerup={endDrag}
 />
 
-<main bind:this={mainEl} style="grid-template-columns: {sidebarWidth}px {editorWidth}px 1fr">
+<main bind:this={mainEl} style="grid-template-columns: {showSidebar ? sidebarWidth : 0}px {editorWidth}px 1fr">
   <header class="topbar">
+    <button class="sidebar-toggle" on:click={() => (showSidebar = !showSidebar)} title="サイドバー (Ctrl+B)">
+      {#if showSidebar}<PanelLeftClose size={16} />{:else}<PanelLeftOpen size={16} />{/if}
+    </button>
     <span class="app-title"><NotebookText size={16} /> Knote</span>
     <div class="topbar-right">
       {#if breadcrumb}<span class="breadcrumb">{breadcrumb}</span>{/if}
@@ -1504,7 +1514,7 @@
     </div>
   </header>
 
-  <nav class="sidebar">
+  <nav class="sidebar" class:hidden={!showSidebar}>
     <div class="search-box">
       <Search size={14} class="search-icon" />
       <input
@@ -1565,15 +1575,17 @@
     </ul>
   </nav>
 
+  {#if showSidebar}
   <div
     class="resize-handle resize-handle-v"
     style="left: {sidebarWidth - 2}px"
     on:pointerdown={(e) => startDrag('sidebar', e)}
   ></div>
+  {/if}
   {#if currentNote && !showGraph && !showKanban && viewMode === 'split'}
     <div
       class="resize-handle resize-handle-v"
-      style="left: {sidebarWidth + editorWidth - 2}px"
+      style="left: {(showSidebar ? sidebarWidth : 0) + editorWidth - 2}px"
       on:pointerdown={(e) => startDrag('editor', e)}
     ></div>
   {/if}
@@ -2006,11 +2018,27 @@
     background: var(--accent);
   }
 
+  .sidebar-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.2rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+  }
+  .sidebar-toggle:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+
   .topbar {
     grid-column: 1 / 4;
     grid-row: 1;
     display: flex;
     align-items: center;
+    gap: 0.4rem;
     justify-content: space-between;
     padding: 0.4rem 0.8rem;
     border-bottom: 1px solid var(--border);
