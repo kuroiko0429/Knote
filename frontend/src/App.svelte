@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { Marp } from '@marp-team/marp-core'
   import renderMathInElement from 'katex/contrib/auto-render'
   import 'katex/dist/katex.min.css'
   import mermaid from 'mermaid'
@@ -134,9 +133,13 @@
   let _marpBlobUrls: string[] = []
   let _lastMarpSrc = ''
   let _marpRenderTimer: ReturnType<typeof setTimeout>
-  let _marpInstance: InstanceType<typeof Marp> | null = null
-  function getMarp() {
-    if (!_marpInstance) _marpInstance = new Marp({ html: true })
+  let _renderTimer: ReturnType<typeof setTimeout>
+  let _marpInstance: any = null
+  async function getMarp(): Promise<any> {
+    if (!_marpInstance) {
+      const { Marp } = await import('@marp-team/marp-core')
+      _marpInstance = new Marp({ html: true })
+    }
     return _marpInstance
   }
   let backlinks: string[] = []
@@ -818,7 +821,7 @@
     return /^\s*marp\s*:\s*true\s*$/m.test(m[1])
   }
 
-  function renderMarpSlides(src: string): void {
+  async function renderMarpSlides(src: string): Promise<void> {
     if (src === _lastMarpSrc && marpSlides.length > 0) {
       isMarp = true
       return
@@ -827,7 +830,8 @@
     _marpBlobUrls.forEach((u) => URL.revokeObjectURL(u))
     _marpBlobUrls = []
 
-    const { html: marpHtml, css } = getMarp().render(src)
+    const marp = await getMarp()
+    const { html: marpHtml, css } = marp.render(src)
     const tmp = document.createElement('div')
     tmp.innerHTML = marpHtml
     const sections = Array.from(tmp.querySelectorAll('section'))
@@ -836,19 +840,37 @@
     const sc = '</' + 'style>'
     const scaleSc = '</' + 'script>'
     const baseCss =
-      `html{margin:0;padding:0}` +
-      `body{margin:0;padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px;background:#1a1a1a}` +
-      `section{width:1280px!important;height:720px!important;box-sizing:border-box;flex-shrink:0;` +
-      `background:#ffffff;color:#000000;overflow:hidden;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,.6)}`
+      `html,body{margin:0;padding:0;background:#1a1a1a}` +
+      `body{padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px}` +
+      `.slide-wrap{overflow:hidden;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,.6)}` +
+      `section{width:1280px!important;height:720px!important;box-sizing:border-box;position:relative;` +
+      `background:#ffffff;color:#000000;overflow:hidden;transform-origin:top left}` +
+      `section>footer{position:absolute!important;bottom:0!important;left:0!important;right:0!important}` +
+      `section table{border-collapse:collapse;width:100%}` +
+      `section th,section td{border:1px solid #ccc;padding:6px 12px;text-align:left}` +
+      `section th{background:#f0f0f0;font-weight:600}`
     const fitScript = `<script>
 (function(){
   function fit(){
-    var els=document.querySelectorAll('section');
-    var scale=Math.min(1,(window.innerWidth-32)/1280);
-    els.forEach(function(s){s.style.zoom=scale;});
+    var wraps=document.querySelectorAll('.slide-wrap');
+    var scale=Math.min(1,(document.documentElement.clientWidth-32)/1280);
+    wraps.forEach(function(w){
+      var s=w.querySelector('section');
+      if(!s)return;
+      s.style.transform='scale('+scale+')';
+      w.style.width=(1280*scale)+'px';
+      w.style.height=(720*scale)+'px';
+    });
   }
-  window.addEventListener('load',function(){fit();requestAnimationFrame(fit);});
-  window.addEventListener('resize',fit);
+  document.querySelectorAll('section').forEach(function(s){
+    var w=document.createElement('div');
+    w.className='slide-wrap';
+    s.parentNode.insertBefore(w,s);
+    w.appendChild(s);
+  });
+  fit();
+  if(window.ResizeObserver){new ResizeObserver(fit).observe(document.documentElement);}
+  else{window.addEventListener('resize',fit);}
 })();
 ${scaleSc}`
 
@@ -869,7 +891,7 @@ ${scaleSc}`
 
   async function render(): Promise<void> {
     if (detectMarp(source)) {
-      renderMarpSlides(source)
+      await renderMarpSlides(source)
       return
     }
     isMarp = false
@@ -1082,11 +1104,12 @@ ${scaleSc}`
   }
 
   function onEdit(): void {
+    clearTimeout(_renderTimer)
+    clearTimeout(_marpRenderTimer)
     if (detectMarp(source)) {
-      clearTimeout(_marpRenderTimer)
       _marpRenderTimer = setTimeout(() => render(), 800)
     } else {
-      render()
+      _renderTimer = setTimeout(() => render(), 150)
     }
     if (!currentNote) return
     clearTimeout(saveTimer)
