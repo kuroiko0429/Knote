@@ -879,6 +879,9 @@ ${scaleSc}`
       `<!DOCTYPE html><html><head>` +
       `<meta charset="utf-8"><meta name="color-scheme" content="light">` +
       `${so}${baseCss}${sc}${so}${css}${sc}` +
+      `${so}section{padding-left:60px!important;padding-right:60px!important}` +
+      `section>header{padding:18px 0!important}` +
+      `section>footer{padding:14px 60px!important}${sc}` +
       `</head><body>${allHtml}${fitScript}</body></html>`
     const blob = new Blob([fullHtml], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
