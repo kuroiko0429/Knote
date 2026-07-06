@@ -844,7 +844,7 @@
       `body{padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px}` +
       `.slide-wrap{overflow:hidden;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,.6)}` +
       `section{width:1280px!important;height:720px!important;box-sizing:border-box;position:relative;` +
-      `background:#ffffff;color:#000000;overflow:hidden;transform-origin:top left}` +
+      `background:#ffffff;overflow:hidden;transform-origin:top left}` +
       `section>footer{position:absolute!important;bottom:0!important;left:0!important;right:0!important}` +
       `section table{border-collapse:collapse;width:100%}` +
       `section th,section td{border:1px solid #ccc;padding:6px 12px;text-align:left}` +
@@ -867,6 +867,13 @@
     w.className='slide-wrap';
     s.parentNode.insertBefore(w,s);
     w.appendChild(s);
+    var pn=s.getAttribute('data-page-number');
+    if(pn){
+      var sp=document.createElement('span');
+      sp.textContent=pn;
+      sp.style.cssText='position:absolute;bottom:18px;right:40px;color:#888;font-size:16px;pointer-events:none;';
+      s.appendChild(sp);
+    }
   });
   fit();
   if(window.ResizeObserver){new ResizeObserver(fit).observe(document.documentElement);}
@@ -879,9 +886,17 @@ ${scaleSc}`
       `<!DOCTYPE html><html><head>` +
       `<meta charset="utf-8"><meta name="color-scheme" content="light">` +
       `${so}${baseCss}${sc}${so}${css}${sc}` +
-      `${so}section{padding-left:60px!important;padding-right:60px!important}` +
-      `section>header{padding:18px 0!important}` +
-      `section>footer{padding:14px 60px!important}${sc}` +
+      `${so}` +
+      `section{display:flex!important;flex-direction:column!important;justify-content:center!important;` +
+      `padding:80px 60px!important;font-size:28px!important}` +
+      `section>header{position:absolute!important;top:0!important;left:0!important;right:0!important;` +
+      `padding:18px 60px!important;color:#888!important;font-size:0.55em!important}` +
+      `section>footer{position:absolute!important;bottom:0!important;left:0!important;right:0!important;` +
+      `padding:18px 60px!important;color:#888!important;font-size:0.55em!important}` +
+      `section[data-page-number]::after{content:attr(data-page-number)!important;` +
+      `position:absolute!important;bottom:18px!important;right:40px!important;` +
+      `font-size:0.55em!important;color:#888!important}` +
+      `${sc}` +
       `</head><body>${allHtml}${fitScript}</body></html>`
     const blob = new Blob([fullHtml], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
