@@ -114,6 +114,9 @@
     SetPreviewFontSize,
     GetMarpTheme,
     SetMarpTheme,
+    GetMarpThemesDir,
+    ListMarpCustomThemes,
+    OpenPath,
     GetTagCounts,
     QueryNotes,
     GetSnippets,
@@ -135,18 +138,34 @@
   let marpSlides: string[] = []
   let marpSlideIdx = 0
   let marpPresentUrl = ''
+  let customMarpThemes: { name: string; css: string }[] = []
   let _marpBlobUrls: string[] = []
   let _lastMarpSrc = ''
   let _lastRawSrc = ''
   let _marpRenderTimer: ReturnType<typeof setTimeout>
   let _renderTimer: ReturnType<typeof setTimeout>
   let _marpInstance: any = null
+  let _loadedCustomThemeNames: string[] = []
   async function getMarp(): Promise<any> {
     if (!_marpInstance) {
       const { Marp } = await import('@marp-team/marp-core')
       _marpInstance = new Marp({ html: true })
     }
+    for (const t of customMarpThemes) {
+      if (!_loadedCustomThemeNames.includes(t.name)) {
+        _marpInstance.themeSet.add(t.css)
+        _loadedCustomThemeNames.push(t.name)
+      }
+    }
     return _marpInstance
+  }
+
+  async function reloadCustomThemes() {
+    customMarpThemes = await ListMarpCustomThemes()
+    _marpInstance = null
+    _loadedCustomThemeNames = []
+    _lastMarpSrc = ''
+    if (isMarp) render()
   }
   let backlinks: string[] = []
   interface BacklinkItem { note: string; snippets: string[] }
@@ -881,7 +900,7 @@
     const sc = '</' + 'style>'
     const scaleSc = '</' + 'script>'
     const baseCss =
-      `html,body{margin:0;padding:0;background:#1a1a1a}` +
+      `html,body{margin:0;padding:0;background:#1a1a1a;scroll-behavior:smooth}` +
       `body{padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px}` +
       `.slide-wrap{overflow:hidden;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,.6)}` +
       `section{width:1280px!important;height:720px!important;box-sizing:border-box;position:relative;` +
@@ -906,6 +925,7 @@
   document.querySelectorAll('section').forEach(function(s,idx){
     var w=document.createElement('div');
     w.className='slide-wrap';
+    w.dataset.slideIdx=String(idx);
     s.parentNode.insertBefore(w,s);
     w.appendChild(s);
   });
@@ -975,6 +995,9 @@ ${scaleSc}`
       `document.getElementById('n').onclick=function(){if(i<sl.length-1)show(i+1);};` +
       `document.getElementById('x').onclick=exit;` +
       `window.addEventListener('resize',function(){show(i);});` +
+      `window.addEventListener('message',function(e){` +
+      `if(e.data&&e.data.type==='marp-next'){if(i<sl.length-1)show(i+1);}` +
+      `else if(e.data&&e.data.type==='marp-prev'){if(i>0)show(i-1);}});` +
       `show(0);` +
       `${pScriptSc}` +
       `</body></html>`
@@ -1666,6 +1689,7 @@ ${scaleSc}`
     editorView = view
     view.scrollDOM.addEventListener('scroll', () => {
       if (!previewEl) return
+      if (isMarp) return
       if (Date.now() - lastPreviewScroll < 120) return
       lastEditorScroll = Date.now()
       const ratio = view.scrollDOM.scrollTop / Math.max(1, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)
@@ -2000,7 +2024,23 @@ ${scaleSc}`
   onMount(async () => {
     window.addEventListener('resize', _onResize)
     window.addEventListener('message', (e: MessageEvent) => {
-      if (e.data?.type === 'marp-exit') isMarpFullscreen = false
+      if (e.data?.type === 'marp-exit') {
+        isMarpFullscreen = false
+      }
+    })
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (!isMarpFullscreen) return
+      const iframe = document.querySelector('.marp-fullscreen-iframe') as HTMLIFrameElement
+      if (!iframe?.contentWindow) return
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'ArrowDown') {
+        iframe.contentWindow.postMessage({ type: 'marp-next' }, '*')
+        e.preventDefault()
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        iframe.contentWindow.postMessage({ type: 'marp-prev' }, '*')
+        e.preventDefault()
+      } else if (e.key === 'Escape') {
+        isMarpFullscreen = false
+      }
     })
     vaultPath = await GetVaultPath()
     templatesFolder = await GetTemplatesFolder()
@@ -2014,9 +2054,8 @@ ${scaleSc}`
     previewFontFamily = await GetPreviewFontFamily()
     previewFontSize = await GetPreviewFontSize()
     const savedMarpTheme = await GetMarpTheme()
-    if (savedMarpTheme === 'gaia' || savedMarpTheme === 'uncover') {
-      marpTheme = savedMarpTheme
-    }
+    if (savedMarpTheme) marpTheme = savedMarpTheme
+    customMarpThemes = await ListMarpCustomThemes()
     applyFont()
     await loadTemplateList()
     await refreshList()
@@ -2303,6 +2342,11 @@ ${scaleSc}`
               <button class:active={marpTheme === 'default'} on:click={() => changeMarpTheme('default')}>Default</button>
               <button class:active={marpTheme === 'gaia'} on:click={() => changeMarpTheme('gaia')}>Gaia</button>
               <button class:active={marpTheme === 'uncover'} on:click={() => changeMarpTheme('uncover')}>Uncover</button>
+              {#each customMarpThemes as ct}
+                <button class:active={marpTheme === ct.name} on:click={() => changeMarpTheme(ct.name)}>{ct.name}</button>
+              {/each}
+              <button class="marp-theme-folder-btn" title="テーマフォルダを開く" on:click={async () => { const d = await GetMarpThemesDir(); OpenPath(d) }}>📁</button>
+              <button class="marp-theme-folder-btn" title="テーマを再読み込み" on:click={reloadCustomThemes}>↺</button>
             </div>
             <button class="marp-present-btn" on:click={() => (isMarpFullscreen = true)}>▶ 発表</button>
           </div>
@@ -3418,6 +3462,21 @@ ${scaleSc}`
 
   .marp-theme-btns button.active {
     background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+
+  .marp-theme-folder-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .marp-theme-folder-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
     color: #fff;
   }
 
