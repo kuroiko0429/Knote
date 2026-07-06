@@ -40,6 +40,7 @@ type App struct {
 	fontSize          int
 	previewFontFamily string
 	previewFontSize   int
+	marpTheme         string
 	watcher           *fsnotify.Watcher
 	ptmx              *os.File
 	shellCmd          *exec.Cmd
@@ -55,6 +56,7 @@ type appConfig struct {
 	FontSize          int    `json:"fontSize"`
 	PreviewFontFamily string `json:"previewFontFamily"`
 	PreviewFontSize   int    `json:"previewFontSize"`
+	MarpTheme         string `json:"marpTheme"`
 }
 
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
@@ -130,6 +132,10 @@ func (a *App) startup(ctx context.Context) {
 	a.fontSize = cfg.FontSize
 	a.previewFontFamily = cfg.PreviewFontFamily
 	a.previewFontSize = cfg.PreviewFontSize
+	a.marpTheme = cfg.MarpTheme
+	if a.marpTheme == "" {
+		a.marpTheme = "default"
+	}
 
 	os.MkdirAll(a.vaultPath, 0755)
 	a.startWatcher()
@@ -274,6 +280,7 @@ func (a *App) saveConfig() error {
 		FontSize:          a.fontSize,
 		PreviewFontFamily: a.previewFontFamily,
 		PreviewFontSize:   a.previewFontSize,
+		MarpTheme:         a.marpTheme,
 	})
 	if err != nil {
 		return err
@@ -343,6 +350,13 @@ func (a *App) SetPreviewFontFamily(family string) error {
 
 func (a *App) SetPreviewFontSize(size int) error {
 	a.previewFontSize = size
+	return a.saveConfig()
+}
+
+func (a *App) GetMarpTheme() string { return a.marpTheme }
+
+func (a *App) SetMarpTheme(theme string) error {
+	a.marpTheme = theme
 	return a.saveConfig()
 }
 

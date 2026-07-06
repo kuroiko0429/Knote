@@ -112,6 +112,8 @@
     SetPreviewFontFamily,
     GetPreviewFontSize,
     SetPreviewFontSize,
+    GetMarpTheme,
+    SetMarpTheme,
     GetTagCounts,
     QueryNotes,
     GetSnippets,
@@ -129,11 +131,13 @@
   let html = ''
   let isMarp = false
   let isMarpFullscreen = false
+  let marpTheme: 'default' | 'gaia' | 'uncover' = 'default'
   let marpSlides: string[] = []
   let marpSlideIdx = 0
   let marpPresentUrl = ''
   let _marpBlobUrls: string[] = []
   let _lastMarpSrc = ''
+  let _lastRawSrc = ''
   let _marpRenderTimer: ReturnType<typeof setTimeout>
   let _renderTimer: ReturnType<typeof setTimeout>
   let _marpInstance: any = null
@@ -817,6 +821,25 @@
   let _keepScrollTop: number | null = null
   let _skipEditorListener = false
 
+  function changeMarpTheme(theme: 'default' | 'gaia' | 'uncover') {
+    marpTheme = theme
+    _lastMarpSrc = ''
+    SetMarpTheme(theme)
+    render()
+  }
+
+  function applyMarpTheme(src: string, theme: string): string {
+    const themeStr = `theme: ${theme}`
+    const fm = src.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/)
+    if (fm) {
+      if (/^theme\s*:/m.test(fm[2])) {
+        return src.replace(/^theme\s*:.*$/m, themeStr)
+      }
+      return src.replace(/^(---\r?\n)/, `$1${themeStr}\n`)
+    }
+    return `---\n${themeStr}\n---\n${src}`
+  }
+
   function detectMarp(src: string): boolean {
     const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---/)
     if (!m) return false
@@ -824,21 +847,36 @@
   }
 
   async function renderMarpSlides(src: string): Promise<void> {
-    if (src === _lastMarpSrc && marpSlides.length > 0) {
+    if (src !== _lastRawSrc) {
+      _lastRawSrc = src
+      const fm = src.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+      if (fm) {
+        const tm = fm[1].match(/^theme\s*:\s*(\S+)/m)
+        if (tm && (tm[1] === 'default' || tm[1] === 'gaia' || tm[1] === 'uncover')) {
+          marpTheme = tm[1] as 'default' | 'gaia' | 'uncover'
+        }
+      }
+    }
+    const cacheKey = src + '\x00' + marpTheme
+    if (cacheKey === _lastMarpSrc && marpSlides.length > 0) {
       isMarp = true
       return
     }
-    _lastMarpSrc = src
+    _lastMarpSrc = cacheKey
     _marpBlobUrls.forEach((u) => URL.revokeObjectURL(u))
     _marpBlobUrls = []
 
     const marp = await getMarp()
-    const { html: marpHtml, css } = marp.render(src)
+    const srcWithTheme = applyMarpTheme(src, marpTheme)
+    const { html: marpHtml, css: rawCss } = marp.render(srcWithTheme)
+    const css = rawCss
+      .replace(/@import[^;]+;/g, '')
+      .replace(/div\.marpit > svg(?:\[[^\]]*\])? > foreignObject(?:\[[^\]]*\])? > /g, '')
+      .replace(/div\.marpit > /g, '')
     const tmp = document.createElement('div')
     tmp.innerHTML = marpHtml
     const sections = Array.from(tmp.querySelectorAll('section'))
 
-    const hasPaginate = /^paginate\s*:\s*true/m.test(src)
     const so = '<' + 'style>'
     const sc = '</' + 'style>'
     const scaleSc = '</' + 'script>'
@@ -870,12 +908,6 @@
     w.className='slide-wrap';
     s.parentNode.insertBefore(w,s);
     w.appendChild(s);
-    if(${hasPaginate}){
-      var sp=document.createElement('span');
-      sp.textContent=String(idx+1);
-      sp.style.cssText='position:absolute;bottom:18px;right:40px;color:#888;font-size:16px;pointer-events:none;';
-      s.appendChild(sp);
-    }
   });
   fit();
   if(window.ResizeObserver){new ResizeObserver(fit).observe(document.documentElement);}
@@ -933,11 +965,7 @@ ${scaleSc}`
       `w.style.marginTop='-'+((720*scl)/2)+'px';` +
       `document.getElementById('c').textContent=(n+1)+' / '+sl.length;` +
       `document.getElementById('p').disabled=n===0;` +
-      `document.getElementById('n').disabled=n===sl.length-1;` +
-      `if(${hasPaginate}){var sp=document.createElement('span');` +
-      `sp.textContent=String(n+1);` +
-      `sp.style.cssText='position:absolute;bottom:18px;right:40px;color:#888;font-size:16px;pointer-events:none;';` +
-      `s.appendChild(sp);}}` +
+      `document.getElementById('n').disabled=n===sl.length-1;}` +
       `function exit(){window.parent.postMessage({type:'marp-exit'},'*');}` +
       `document.addEventListener('keydown',function(e){` +
       `if(e.key==='ArrowRight'||e.key===' '||e.key==='ArrowDown'){if(i<sl.length-1){show(i+1);e.preventDefault();}}` +
@@ -1985,6 +2013,10 @@ ${scaleSc}`
     fontSize = await GetFontSize()
     previewFontFamily = await GetPreviewFontFamily()
     previewFontSize = await GetPreviewFontSize()
+    const savedMarpTheme = await GetMarpTheme()
+    if (savedMarpTheme === 'gaia' || savedMarpTheme === 'uncover') {
+      marpTheme = savedMarpTheme
+    }
     applyFont()
     await loadTemplateList()
     await refreshList()
@@ -2266,7 +2298,14 @@ ${scaleSc}`
             title="Marp Presentation"
             src={marpSlides[0]}
           ></iframe>
-          <button class="marp-present-btn" on:click={() => (isMarpFullscreen = true)} title="プレゼンモード">▶ 発表</button>
+          <div class="marp-toolbar">
+            <div class="marp-theme-btns">
+              <button class:active={marpTheme === 'default'} on:click={() => changeMarpTheme('default')}>Default</button>
+              <button class:active={marpTheme === 'gaia'} on:click={() => changeMarpTheme('gaia')}>Gaia</button>
+              <button class:active={marpTheme === 'uncover'} on:click={() => changeMarpTheme('uncover')}>Uncover</button>
+            </div>
+            <button class="marp-present-btn" on:click={() => (isMarpFullscreen = true)}>▶ 発表</button>
+          </div>
         </div>
       {:else if !isMarp}
         {#if noteTags.length}
@@ -3336,10 +3375,53 @@ ${scaleSc}`
     border: none;
   }
 
-  .marp-present-btn {
+  .marp-toolbar {
     position: absolute;
     bottom: 16px;
     right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .marp-preview-wrap:hover .marp-toolbar {
+    opacity: 1;
+  }
+
+  .marp-theme-btns {
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 4px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  .marp-theme-btns button {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.1s, color 0.1s;
+  }
+
+  .marp-theme-btns button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  .marp-theme-btns button.active {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+
+  .marp-present-btn {
     background: rgba(0, 0, 0, 0.65);
     color: #fff;
     border: 1px solid rgba(255, 255, 255, 0.25);
@@ -3347,13 +3429,10 @@ ${scaleSc}`
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
-    z-index: 10;
-    opacity: 0;
-    transition: opacity 0.15s;
   }
 
-  .marp-preview-wrap:hover .marp-present-btn {
-    opacity: 1;
+  .marp-present-btn:hover {
+    background: rgba(0, 0, 0, 0.85);
   }
 
   .marp-fullscreen {
