@@ -128,8 +128,10 @@
   let source = ''
   let html = ''
   let isMarp = false
+  let isMarpFullscreen = false
   let marpSlides: string[] = []
   let marpSlideIdx = 0
+  let marpPresentUrl = ''
   let _marpBlobUrls: string[] = []
   let _lastMarpSrc = ''
   let _marpRenderTimer: ReturnType<typeof setTimeout>
@@ -881,22 +883,82 @@
 })();
 ${scaleSc}`
 
-    const allHtml = sections.map((s) => s.outerHTML).join('')
-    const fullHtml =
-      `<!DOCTYPE html><html><head>` +
-      `<meta charset="utf-8"><meta name="color-scheme" content="light">` +
-      `${so}${baseCss}${sc}${so}${css}${sc}` +
-      `${so}` +
+    const slidesJson = JSON.stringify(sections.map((s) => s.outerHTML))
+    const pScriptSc = '</' + 'script>'
+    const overrideCss =
       `section{display:flex!important;flex-direction:column!important;justify-content:center!important;` +
       `padding:80px 60px!important;font-size:28px!important}` +
       `section>header{position:absolute!important;top:0!important;left:0!important;right:0!important;` +
       `padding:18px 60px!important;color:#888!important;font-size:0.55em!important}` +
       `section>footer{position:absolute!important;bottom:0!important;left:0!important;right:0!important;` +
-      `padding:18px 60px!important;color:#888!important;font-size:0.55em!important}` +
-      `section[data-page-number]::after{content:attr(data-page-number)!important;` +
-      `position:absolute!important;bottom:18px!important;right:40px!important;` +
-      `font-size:0.55em!important;color:#888!important}` +
-      `${sc}` +
+      `padding:18px 60px!important;color:#888!important;font-size:0.55em!important}`
+    const presentHtml =
+      `<!DOCTYPE html><html><head>` +
+      `<meta charset="utf-8"><meta name="color-scheme" content="light">` +
+      `${so}html,body{margin:0;padding:0;background:#000;overflow:hidden;width:100vw;height:100vh}` +
+      `#wrap{position:fixed;top:50%;left:50%}` +
+      `section{width:1280px!important;height:720px!important;box-sizing:border-box;position:relative;background:#fff;overflow:hidden;transform-origin:top left}` +
+      `section>footer{position:absolute!important;bottom:0!important;left:0!important;right:0!important}` +
+      `section table{border-collapse:collapse;width:100%}` +
+      `section th,section td{border:1px solid #ccc;padding:6px 12px;text-align:left}` +
+      `section th{background:#f0f0f0;font-weight:600}` +
+      `.ctrl{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center;` +
+      `background:rgba(0,0,0,.5);padding:8px 18px;border-radius:20px;font-family:sans-serif;font-size:14px;color:rgba(255,255,255,.8)}` +
+      `.ctrl button{background:none;border:1px solid rgba(255,255,255,.3);color:rgba(255,255,255,.8);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px}` +
+      `.ctrl button:hover{background:rgba(255,255,255,.15)}` +
+      `.ctrl button:disabled{opacity:.3;cursor:default}` +
+      `.xbtn{position:fixed;top:14px;right:14px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);` +
+      `color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:13px;font-family:sans-serif}` +
+      `.xbtn:hover{background:rgba(255,255,255,.2)}${sc}` +
+      `${so}${css}${sc}` +
+      `${so}${overrideCss}${sc}` +
+      `</head><body>` +
+      `<div id="wrap"></div>` +
+      `<div class="ctrl"><button id="p">◀</button><span id="c"></span><button id="n">▶</button></div>` +
+      `<button class="xbtn" id="x">✕ 終了</button>` +
+      `<script>` +
+      `var sl=${slidesJson};` +
+      `var i=0;` +
+      `function show(n){` +
+      `i=n;` +
+      `var w=document.getElementById('wrap');` +
+      `w.innerHTML=sl[n];` +
+      `var s=w.querySelector('section');` +
+      `var scl=Math.min(window.innerWidth/1280,window.innerHeight/720);` +
+      `s.style.transform='scale('+scl+')';` +
+      `s.style.transformOrigin='top left';` +
+      `w.style.width=(1280*scl)+'px';` +
+      `w.style.height=(720*scl)+'px';` +
+      `w.style.marginLeft='-'+((1280*scl)/2)+'px';` +
+      `w.style.marginTop='-'+((720*scl)/2)+'px';` +
+      `document.getElementById('c').textContent=(n+1)+' / '+sl.length;` +
+      `document.getElementById('p').disabled=n===0;` +
+      `document.getElementById('n').disabled=n===sl.length-1;` +
+      `if(${hasPaginate}){var sp=document.createElement('span');` +
+      `sp.textContent=String(n+1);` +
+      `sp.style.cssText='position:absolute;bottom:18px;right:40px;color:#888;font-size:16px;pointer-events:none;';` +
+      `s.appendChild(sp);}}` +
+      `function exit(){window.parent.postMessage({type:'marp-exit'},'*');}` +
+      `document.addEventListener('keydown',function(e){` +
+      `if(e.key==='ArrowRight'||e.key===' '||e.key==='ArrowDown'){if(i<sl.length-1){show(i+1);e.preventDefault();}}` +
+      `else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){if(i>0){show(i-1);e.preventDefault();}}` +
+      `else if(e.key==='Escape'){exit();}});` +
+      `document.getElementById('p').onclick=function(){if(i>0)show(i-1);};` +
+      `document.getElementById('n').onclick=function(){if(i<sl.length-1)show(i+1);};` +
+      `document.getElementById('x').onclick=exit;` +
+      `window.addEventListener('resize',function(){show(i);});` +
+      `show(0);` +
+      `${pScriptSc}` +
+      `</body></html>`
+    if (marpPresentUrl) URL.revokeObjectURL(marpPresentUrl)
+    marpPresentUrl = URL.createObjectURL(new Blob([presentHtml], { type: 'text/html' }))
+
+    const allHtml = sections.map((s) => s.outerHTML).join('')
+    const fullHtml =
+      `<!DOCTYPE html><html><head>` +
+      `<meta charset="utf-8"><meta name="color-scheme" content="light">` +
+      `${so}${baseCss}${sc}${so}${css}${sc}` +
+      `${so}${overrideCss}${sc}` +
       `</head><body>${allHtml}${fitScript}</body></html>`
     const blob = new Blob([fullHtml], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
@@ -1909,6 +1971,9 @@ ${scaleSc}`
   const _onResize = () => { windowWidth = window.innerWidth }
   onMount(async () => {
     window.addEventListener('resize', _onResize)
+    window.addEventListener('message', (e: MessageEvent) => {
+      if (e.data?.type === 'marp-exit') isMarpFullscreen = false
+    })
     vaultPath = await GetVaultPath()
     templatesFolder = await GetTemplatesFolder()
     dailyNoteFolder = await GetDailyNoteFolder()
@@ -2195,11 +2260,14 @@ ${scaleSc}`
     </div>
     <div class="preview" class:full={viewMode === 'preview' || compactMode} class:hidden={viewMode === 'editor' && !compactMode || compactMode && viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} class:marp-mode={isMarp} bind:this={previewEl} on:scroll={onPreviewScroll}>
       {#if isMarp && marpSlides.length > 0}
-        <iframe
-          class="marp-frame"
-          title="Marp Presentation"
-          src={marpSlides[0]}
-        ></iframe>
+        <div class="marp-preview-wrap">
+          <iframe
+            class="marp-frame"
+            title="Marp Presentation"
+            src={marpSlides[0]}
+          ></iframe>
+          <button class="marp-present-btn" on:click={() => (isMarpFullscreen = true)} title="プレゼンモード">▶ 発表</button>
+        </div>
       {:else if !isMarp}
         {#if noteTags.length}
           <div class="note-tags">
@@ -2581,6 +2649,12 @@ ${scaleSc}`
 
 {#if toast}
   <div class="toast">{toast}</div>
+{/if}
+
+{#if isMarpFullscreen}
+  <div class="marp-fullscreen">
+    <iframe src={marpPresentUrl} title="Marp Fullscreen" class="marp-fullscreen-iframe"></iframe>
+  </div>
 {/if}
 
 {#if moveTargetNote}
@@ -3250,7 +3324,46 @@ ${scaleSc}`
     background: #1a1a1a;
   }
 
+  .marp-preview-wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
   .marp-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+
+  .marp-present-btn {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .marp-preview-wrap:hover .marp-present-btn {
+    opacity: 1;
+  }
+
+  .marp-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: #000;
+  }
+
+  .marp-fullscreen-iframe {
     width: 100%;
     height: 100%;
     border: none;
