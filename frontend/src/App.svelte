@@ -836,6 +836,7 @@
     tmp.innerHTML = marpHtml
     const sections = Array.from(tmp.querySelectorAll('section'))
 
+    const hasPaginate = /^paginate\s*:\s*true/m.test(src)
     const so = '<' + 'style>'
     const sc = '</' + 'style>'
     const scaleSc = '</' + 'script>'
@@ -862,15 +863,14 @@
       w.style.height=(720*scale)+'px';
     });
   }
-  document.querySelectorAll('section').forEach(function(s){
+  document.querySelectorAll('section').forEach(function(s,idx){
     var w=document.createElement('div');
     w.className='slide-wrap';
     s.parentNode.insertBefore(w,s);
     w.appendChild(s);
-    var pn=s.getAttribute('data-page-number');
-    if(pn){
+    if(${hasPaginate}){
       var sp=document.createElement('span');
-      sp.textContent=pn;
+      sp.textContent=String(idx+1);
       sp.style.cssText='position:absolute;bottom:18px;right:40px;color:#888;font-size:16px;pointer-events:none;';
       s.appendChild(sp);
     }
