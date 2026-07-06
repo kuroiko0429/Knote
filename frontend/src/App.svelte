@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import { Marp } from '@marp-team/marp-core'
   import renderMathInElement from 'katex/contrib/auto-render'
   import 'katex/dist/katex.min.css'
   import mermaid from 'mermaid'
@@ -127,6 +128,17 @@
   let openTabs: string[] = []
   let source = ''
   let html = ''
+  let isMarp = false
+  let marpSlides: string[] = []
+  let marpSlideIdx = 0
+  let _marpBlobUrls: string[] = []
+  let _lastMarpSrc = ''
+  let _marpRenderTimer: ReturnType<typeof setTimeout>
+  let _marpInstance: InstanceType<typeof Marp> | null = null
+  function getMarp() {
+    if (!_marpInstance) _marpInstance = new Marp({ html: true })
+    return _marpInstance
+  }
   let backlinks: string[] = []
   interface BacklinkItem { note: string; snippets: string[] }
   let backlinkItems: BacklinkItem[] = []
@@ -800,7 +812,67 @@
   let _keepScrollTop: number | null = null
   let _skipEditorListener = false
 
+  function detectMarp(src: string): boolean {
+    const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+    if (!m) return false
+    return /^\s*marp\s*:\s*true\s*$/m.test(m[1])
+  }
+
+  function renderMarpSlides(src: string): void {
+    if (src === _lastMarpSrc && marpSlides.length > 0) {
+      isMarp = true
+      return
+    }
+    _lastMarpSrc = src
+    _marpBlobUrls.forEach((u) => URL.revokeObjectURL(u))
+    _marpBlobUrls = []
+
+    const { html: marpHtml, css } = getMarp().render(src)
+    const tmp = document.createElement('div')
+    tmp.innerHTML = marpHtml
+    const sections = Array.from(tmp.querySelectorAll('section'))
+
+    const so = '<' + 'style>'
+    const sc = '</' + 'style>'
+    const scaleSc = '</' + 'script>'
+    const baseCss =
+      `html{margin:0;padding:0}` +
+      `body{margin:0;padding:16px;display:flex;flex-direction:column;align-items:center;gap:16px;background:#1a1a1a}` +
+      `section{width:1280px!important;height:720px!important;box-sizing:border-box;flex-shrink:0;` +
+      `background:#ffffff;color:#000000;overflow:hidden;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,.6)}`
+    const fitScript = `<script>
+(function(){
+  function fit(){
+    var els=document.querySelectorAll('section');
+    var scale=Math.min(1,(window.innerWidth-32)/1280);
+    els.forEach(function(s){s.style.zoom=scale;});
+  }
+  window.addEventListener('load',function(){fit();requestAnimationFrame(fit);});
+  window.addEventListener('resize',fit);
+})();
+${scaleSc}`
+
+    const allHtml = sections.map((s) => s.outerHTML).join('')
+    const fullHtml =
+      `<!DOCTYPE html><html><head>` +
+      `<meta charset="utf-8"><meta name="color-scheme" content="light">` +
+      `${so}${baseCss}${sc}${so}${css}${sc}` +
+      `</head><body>${allHtml}${fitScript}</body></html>`
+    const blob = new Blob([fullHtml], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    _marpBlobUrls.push(url)
+    marpSlides = [url]
+
+    if (marpSlideIdx >= marpSlides.length) marpSlideIdx = 0
+    isMarp = true
+  }
+
   async function render(): Promise<void> {
+    if (detectMarp(source)) {
+      renderMarpSlides(source)
+      return
+    }
+    isMarp = false
     html = await RenderMarkdown(source)
     await tick()
     if (_keepScrollTop !== null && previewEl) {
@@ -1010,7 +1082,12 @@
   }
 
   function onEdit(): void {
-    render()
+    if (detectMarp(source)) {
+      clearTimeout(_marpRenderTimer)
+      _marpRenderTimer = setTimeout(() => render(), 800)
+    } else {
+      render()
+    }
     if (!currentNote) return
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
@@ -2075,15 +2152,23 @@
         <div class="editor-mount" use:initEditor></div>
       {/key}
     </div>
-    <div class="preview" class:full={viewMode === 'preview' || compactMode} class:hidden={viewMode === 'editor' && !compactMode || compactMode && viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} bind:this={previewEl} on:scroll={onPreviewScroll}>
-      {#if noteTags.length}
-        <div class="note-tags">
-          {#each noteTags as tag}
-            <button class="tag-chip" on:click={() => selectTag(tag)}><Tag size={11} />{tag}</button>
-          {/each}
-        </div>
+    <div class="preview" class:full={viewMode === 'preview' || compactMode} class:hidden={viewMode === 'editor' && !compactMode || compactMode && viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} class:marp-mode={isMarp} bind:this={previewEl} on:scroll={onPreviewScroll}>
+      {#if isMarp && marpSlides.length > 0}
+        <iframe
+          class="marp-frame"
+          title="Marp Presentation"
+          src={marpSlides[0]}
+        ></iframe>
+      {:else if !isMarp}
+        {#if noteTags.length}
+          <div class="note-tags">
+            {#each noteTags as tag}
+              <button class="tag-chip" on:click={() => selectTag(tag)}><Tag size={11} />{tag}</button>
+            {/each}
+          </div>
+        {/if}
+        <div bind:this={previewContentEl} on:click={onPreviewClick}>{@html html}</div>
       {/if}
-      <div bind:this={previewContentEl} on:click={onPreviewClick}>{@html html}</div>
     </div>
   {:else}
     <div class="empty">ノートを選ぶか、新規作成して</div>
@@ -3116,6 +3201,18 @@
 
   .preview.no-scroll {
     overflow: hidden;
+  }
+
+  .preview.marp-mode {
+    padding: 0;
+    overflow: hidden;
+    background: #1a1a1a;
+  }
+
+  .marp-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
   }
 
   .outline-panel {
