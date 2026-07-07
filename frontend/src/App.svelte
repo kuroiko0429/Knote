@@ -338,6 +338,10 @@
     el.style.setProperty('--preview-font', $previewFontFamily || 'inherit')
     el.style.setProperty('--preview-font-size', $previewFontSize > 0 ? `${$previewFontSize}px` : '15px')
   }
+  let fontFamilyInput = ''
+  let previewFontFamilyInput = ''
+  $: fontFamilyInput = $fontFamily
+  $: previewFontFamilyInput = $previewFontFamily
   let terminalRef: { refreshTheme: () => void } | null = null
 
   async function applyTheme(name: string) {
@@ -1922,10 +1926,14 @@
     themeList = await ListThemes()
     const saved = await GetActiveTheme()
     if (saved) await applyTheme(saved)
-    $fontFamily = await GetFontFamily()
-    $fontSize = await GetFontSize()
-    $previewFontFamily = await GetPreviewFontFamily()
-    $previewFontSize = await GetPreviewFontSize()
+    const loadedFontFamily = await GetFontFamily()
+    const loadedFontSize = await GetFontSize()
+    const loadedPreviewFontFamily = await GetPreviewFontFamily()
+    const loadedPreviewFontSize = await GetPreviewFontSize()
+    $fontFamily = loadedFontFamily
+    $fontSize = loadedFontSize
+    $previewFontFamily = loadedPreviewFontFamily
+    $previewFontSize = loadedPreviewFontSize
     const savedMarpTheme = await GetMarpTheme()
     if (savedMarpTheme) marpTheme = savedMarpTheme
     customMarpThemes = await ListMarpCustomThemes()
@@ -2385,8 +2393,8 @@
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">フォント名</span>
                   <input type="text" class="settings-input" placeholder="例: Noto Sans JP, monospace"
-                    bind:value={$fontFamily}
-                    on:change={async () => { await SetFontFamily($fontFamily) }} />
+                    bind:value={fontFamilyInput}
+                    on:change={async () => { $fontFamily = fontFamilyInput; await SetFontFamily($fontFamily) }} />
                 </div>
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">サイズ</span>
@@ -2404,8 +2412,8 @@
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">フォント名</span>
                   <input type="text" class="settings-input" placeholder="例: Noto Sans JP, sans-serif"
-                    bind:value={$previewFontFamily}
-                    on:change={async () => { await SetPreviewFontFamily($previewFontFamily) }} />
+                    bind:value={previewFontFamilyInput}
+                    on:change={async () => { $previewFontFamily = previewFontFamilyInput; await SetPreviewFontFamily($previewFontFamily) }} />
                 </div>
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">サイズ</span>
