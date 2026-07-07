@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import renderMathInElement from 'katex/contrib/auto-render'
   import 'katex/dist/katex.min.css'
-  import mermaid from 'mermaid'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor, highlightActiveLine, keymap, ViewPlugin, Decoration, WidgetType } from '@codemirror/view'
   import { EditorState, EditorSelection, Prec, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
@@ -118,10 +116,12 @@
     ListMarpCustomThemes,
     OpenPath,
     GetTagCounts,
-    QueryNotes,
     GetSnippets,
     SaveSnippets,
   } from '../wailsjs/go/main/App.js'
+  import type { BacklinkItem, SnippetDef, PaletteItem, OutlineItem } from './lib/types'
+  import { toast, showToast, fontFamily, fontSize, previewFontFamily, previewFontSize } from './lib/stores'
+  import { applyCheckboxes, applyMath, applyMermaid, applyDataview, applyCodeBlockButtons } from './lib/markdown'
 
   let notes: string[] = []
   let folders: string[] = []
@@ -171,7 +171,6 @@
     if (isMarp) render()
   }
   let backlinks: string[] = []
-  interface BacklinkItem { note: string; snippets: string[] }
   let backlinkItems: BacklinkItem[] = []
   let showBacklinks = false
   let saveTimer: ReturnType<typeof setTimeout>
@@ -238,17 +237,8 @@
   let saveStatus = ''
   let saveStatusTimer: ReturnType<typeof setTimeout>
   let lastSelfSavedContent: Map<string, string> = new Map()
-  let toast = ''
-  let toastTimer: ReturnType<typeof setTimeout>
-
-  function showToast(msg: string) {
-    toast = msg
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toast = ''), 4000)
-  }
   let contextMenu: { x: number; y: number; type: 'empty' | 'note' | 'folder'; path?: string } | null = null
   let theme: 'dark' | 'light' = (localStorage.getItem('knote-theme') as 'dark' | 'light' | null) ?? 'dark'
-  interface SnippetDef { trigger: string; name: string; content: string }
   let snippets: SnippetDef[] = []
   let vimMode: boolean = localStorage.getItem('knote-vim') === 'true'
   let vimModeLabel = 'NORMAL'
@@ -340,17 +330,13 @@
   let themeList: string[] = []
   let activeTheme = ''
   let themeStyleEl: HTMLStyleElement | null = null
-  let fontFamily = ''
-  let fontSize = 0
-  let previewFontFamily = ''
-  let previewFontSize = 0
 
-  function applyFont(): void {
+  $: {
     const el = document.documentElement
-    el.style.setProperty('--editor-font', fontFamily || 'inherit')
-    el.style.setProperty('--editor-font-size', fontSize > 0 ? `${fontSize}px` : '14px')
-    el.style.setProperty('--preview-font', previewFontFamily || 'inherit')
-    el.style.setProperty('--preview-font-size', previewFontSize > 0 ? `${previewFontSize}px` : '15px')
+    el.style.setProperty('--editor-font', $fontFamily || 'inherit')
+    el.style.setProperty('--editor-font-size', $fontSize > 0 ? `${$fontSize}px` : '14px')
+    el.style.setProperty('--preview-font', $previewFontFamily || 'inherit')
+    el.style.setProperty('--preview-font-size', $previewFontSize > 0 ? `${$previewFontSize}px` : '15px')
   }
   let terminalRef: { refreshTheme: () => void } | null = null
 
@@ -406,11 +392,6 @@
   let qsInputEl: HTMLInputElement
   let qsMode: 'normal' | 'rename' | 'newFolder' = 'normal'
   let qsSubValue = ''
-
-  type PaletteItem =
-    | { kind: 'cmd'; label: string; shortcut?: string; action: () => void }
-    | { kind: 'note'; path: string }
-    | { kind: 'create'; path: string }
 
   async function doExportHTML() {
     if (!currentNote) return
@@ -1074,187 +1055,29 @@
       _keepScrollTop = null
     }
     await updateOutline()
-    applyCodeBlockButtons()
-    applyCheckboxes()
-    applyMath()
-    await applyMermaid()
-    await applyDataview()
-  }
-
-  function applyCheckboxes(): void {
-    if (!previewContentEl) return
-    const boxes = Array.from(previewContentEl.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[]
-    boxes.forEach((cb, idx) => {
-      cb.removeAttribute('disabled')
-      cb.addEventListener('click', (e) => {
-        e.preventDefault()
-        let count = 0
-        const newSource = source.replace(/^(\s*[-*+]\s+)\[([xX ])\]/gm, (match, prefix, state) => {
-          if (count++ === idx) return `${prefix}[${state.trim() === '' ? 'x' : ' '}]`
-          return match
-        })
-        if (newSource === source) return
-        source = newSource
-        _keepScrollTop = previewEl?.scrollTop ?? 0
-        lastEditorScroll = Date.now()
-        lastPreviewScroll = Date.now()
-        if (editorView) {
-          _skipEditorListener = true
-          editorView.dispatch({
-            changes: { from: 0, to: editorView.state.doc.length, insert: source },
-          })
-          _skipEditorListener = false
-        }
-        onEdit()
-      })
+    applyCodeBlockButtons(previewContentEl, async (lang, code) => {
+      showTerminal = true
+      await StartTerminal()
+      const cmd = await PrepareRunFile(lang, code)
+      WriteTerminal(cmd + '\n')
     })
-  }
-
-  function applyMath(): void {
-    if (!previewContentEl) return
-    renderMathInElement(previewContentEl, {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '$', right: '$', display: false },
-      ],
-      throwOnError: false,
-    })
-  }
-
-  let mermaidInitialized = false
-
-  async function applyMermaid(): Promise<void> {
-    if (!previewContentEl) return
-    if (!mermaidInitialized) {
-      mermaid.initialize({ startOnLoad: false, theme: 'dark' })
-      mermaidInitialized = true
-    }
-    const blocks = Array.from(
-      previewContentEl.querySelectorAll('code.language-mermaid')
-    ) as HTMLElement[]
-    for (const code of blocks) {
-      const pre = code.parentElement
-      if (!pre || pre.dataset.mermaidRendered) continue
-      const source = code.textContent ?? ''
-      try {
-        const id = 'mermaid-' + Math.random().toString(36).slice(2)
-        const { svg } = await mermaid.render(id, source)
-        const wrapper = document.createElement('div')
-        wrapper.className = 'mermaid-diagram'
-        wrapper.innerHTML = svg
-        pre.replaceWith(wrapper)
-      } catch {
-        pre.dataset.mermaidRendered = 'error'
-      }
-    }
-  }
-
-  function dvEscape(s: string): string {
-    return s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
-  }
-
-  async function applyDataview(): Promise<void> {
-    if (!previewContentEl) return
-    const blocks = Array.from(
-      previewContentEl.querySelectorAll('pre > code.language-dataview')
-    ) as HTMLElement[]
-    for (const code of blocks) {
-      const pre = code.parentElement!
-      const query = code.textContent ?? ''
-      const result = await QueryNotes(query)
-
-      const container = document.createElement('div')
-      container.className = 'dataview-result'
-
-      if (result.error) {
-        container.innerHTML = `<div class="dataview-error">${dvEscape(result.error)}</div>`
-      } else if (result.mode === 'table') {
-        const cols = result.columns?.length ? result.columns : ['file.name']
-        let out = '<table class="dataview-table"><thead><tr>'
-        for (const col of cols) {
-          out += `<th>${dvEscape(col)}</th>`
-        }
-        out += '</tr></thead><tbody>'
-        for (const row of result.rows ?? []) {
-          out += '<tr>'
-          for (const col of cols) {
-            const val = row[col] ?? ''
-            if (col === 'file' || col === 'file.name') {
-              const fp = row['file'] ?? ''
-              const name = row['file.name'] ?? fp
-              out += `<td><a class="dv-link" data-path="${dvEscape(fp)}">${dvEscape(name)}</a></td>`
-            } else {
-              out += `<td>${dvEscape(val)}</td>`
-            }
-          }
-          out += '</tr>'
-        }
-        out += '</tbody></table>'
-        if ((result.rows?.length ?? 0) === 0) {
-          out += '<div class="dataview-empty">該当なし</div>'
-        }
-        container.innerHTML = out
-      } else {
-        // LIST
-        let out = '<ul class="dataview-list">'
-        for (const row of result.rows ?? []) {
-          const fp = row['file'] ?? ''
-          const name = row['file.name'] ?? fp
-          out += `<li><a class="dv-link" data-path="${dvEscape(fp)}">${dvEscape(name)}</a></li>`
-        }
-        out += '</ul>'
-        if ((result.rows?.length ?? 0) === 0) {
-          out += '<div class="dataview-empty">該当なし</div>'
-        }
-        container.innerHTML = out
-      }
-
-      // wire up note links
-      for (const a of Array.from(container.querySelectorAll('a.dv-link')) as HTMLAnchorElement[]) {
-        const p = a.dataset.path ?? ''
-        a.addEventListener('click', (e) => {
-          e.preventDefault()
-          if (p) openTab(p.replace(/\.md$/, ''))
+    applyCheckboxes(previewContentEl, source, (next) => {
+      source = next
+      _keepScrollTop = previewEl?.scrollTop ?? 0
+      lastEditorScroll = Date.now()
+      lastPreviewScroll = Date.now()
+      if (editorView) {
+        _skipEditorListener = true
+        editorView.dispatch({
+          changes: { from: 0, to: editorView.state.doc.length, insert: source },
         })
+        _skipEditorListener = false
       }
-
-      pre.replaceWith(container)
-    }
-  }
-
-  function applyCodeBlockButtons(): void {
-    if (!previewContentEl) return
-    for (const pre of Array.from(previewContentEl.querySelectorAll('pre')) as HTMLElement[]) {
-      const code = pre.querySelector('code')
-      if (!code) continue
-      pre.style.position = 'relative'
-      const btn = document.createElement('button')
-      btn.className = 'code-run-btn'
-      btn.textContent = '▶ run'
-      btn.title = 'ターミナルで実行'
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation()
-        const text = (code.textContent || '').trimEnd()
-        if (!text) return
-        const lang = (code.className || '').replace('language-', '').split(' ')[0]
-        showTerminal = true
-        await StartTerminal()
-        const cmd = await PrepareRunFile(lang, text)
-        WriteTerminal(cmd + '\n')
-      })
-      pre.appendChild(btn)
-    }
-  }
-
-  interface OutlineItem {
-    level: number
-    text: string
-    el: HTMLElement
+      onEdit()
+    })
+    applyMath(previewContentEl)
+    await applyMermaid(previewContentEl, 'dark')
+    await applyDataview(previewContentEl, openTab)
   }
 
   let outline: OutlineItem[] = []
@@ -2099,14 +1922,13 @@
     themeList = await ListThemes()
     const saved = await GetActiveTheme()
     if (saved) await applyTheme(saved)
-    fontFamily = await GetFontFamily()
-    fontSize = await GetFontSize()
-    previewFontFamily = await GetPreviewFontFamily()
-    previewFontSize = await GetPreviewFontSize()
+    $fontFamily = await GetFontFamily()
+    $fontSize = await GetFontSize()
+    $previewFontFamily = await GetPreviewFontFamily()
+    $previewFontSize = await GetPreviewFontSize()
     const savedMarpTheme = await GetMarpTheme()
     if (savedMarpTheme) marpTheme = savedMarpTheme
     customMarpThemes = await ListMarpCustomThemes()
-    applyFont()
     await loadTemplateList()
     await refreshList()
     EventsOn('vault:changed', onVaultChanged)
@@ -2554,26 +2376,24 @@
                 <div class="settings-font-header">
                   <span class="settings-label">エディタ</span>
                   <button class="settings-sync-btn" on:click={async () => {
-                    previewFontFamily = fontFamily
-                    previewFontSize = fontSize
-                    await SetPreviewFontFamily(previewFontFamily)
-                    await SetPreviewFontSize(previewFontSize)
-                    applyFont()
+                    $previewFontFamily = $fontFamily
+                    $previewFontSize = $fontSize
+                    await SetPreviewFontFamily($previewFontFamily)
+                    await SetPreviewFontSize($previewFontSize)
                   }}>プレビューに同期</button>
                 </div>
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">フォント名</span>
                   <input type="text" class="settings-input" placeholder="例: Noto Sans JP, monospace"
-                    bind:value={fontFamily}
-                    on:change={async () => { await SetFontFamily(fontFamily); applyFont() }} />
+                    bind:value={$fontFamily}
+                    on:change={async () => { await SetFontFamily($fontFamily) }} />
                 </div>
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">サイズ</span>
                   <div class="settings-range-row">
-                    <input type="range" min="10" max="24" step="1" bind:value={fontSize}
-                      on:input={() => applyFont()}
-                      on:change={async () => { await SetFontSize(fontSize); applyFont() }} />
-                    <span>{fontSize || 14}px</span>
+                    <input type="range" min="10" max="24" step="1" bind:value={$fontSize}
+                      on:change={async () => { await SetFontSize($fontSize) }} />
+                    <span>{$fontSize || 14}px</span>
                   </div>
                 </div>
               </div>
@@ -2584,16 +2404,15 @@
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">フォント名</span>
                   <input type="text" class="settings-input" placeholder="例: Noto Sans JP, sans-serif"
-                    bind:value={previewFontFamily}
-                    on:change={async () => { await SetPreviewFontFamily(previewFontFamily); applyFont() }} />
+                    bind:value={$previewFontFamily}
+                    on:change={async () => { await SetPreviewFontFamily($previewFontFamily) }} />
                 </div>
                 <div class="settings-row settings-row-column">
                   <span class="settings-label">サイズ</span>
                   <div class="settings-range-row">
-                    <input type="range" min="10" max="24" step="1" bind:value={previewFontSize}
-                      on:input={() => applyFont()}
-                      on:change={async () => { await SetPreviewFontSize(previewFontSize); applyFont() }} />
-                    <span>{previewFontSize || 15}px</span>
+                    <input type="range" min="10" max="24" step="1" bind:value={$previewFontSize}
+                      on:change={async () => { await SetPreviewFontSize($previewFontSize) }} />
+                    <span>{$previewFontSize || 15}px</span>
                   </div>
                 </div>
               </div>
@@ -2795,8 +2614,8 @@
   </div>
 {/if}
 
-{#if toast}
-  <div class="toast">{toast}</div>
+{#if $toast}
+  <div class="toast">{$toast}</div>
 {/if}
 
 {#if isMarpFullscreen}
