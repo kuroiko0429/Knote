@@ -1609,7 +1609,7 @@
     </div>
     <div class="preview" class:full={viewMode === 'preview' || compactMode} class:hidden={viewMode === 'editor' && !compactMode || compactMode && viewMode === 'editor'} class:no-scroll={showQuickSwitcher || showSettings} class:marp-mode={isMarp} bind:this={previewEl} on:scroll={onPreviewScroll}>
       {#if isMarp}
-        <MarpPreview {source} />
+        <MarpPreview {source} path={currentNote ?? ''} />
       {:else}
         {#if noteTags.length}
           <div class="note-tags">

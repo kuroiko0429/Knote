@@ -11,6 +11,7 @@
   import { GetMarpTheme, SetMarpTheme, GetMarpThemesDir, ListMarpCustomThemes, OpenPath } from '../wailsjs/go/main/App.js'
 
   export let source: string
+  export let path = ''
 
   let isMarpFullscreen = false
   let marpTheme: 'default' | 'gaia' | 'uncover' = 'default'
@@ -128,7 +129,20 @@
     return `---\n${themeStr}\n---\n${src}`
   }
 
+  let _themeInitPromise: Promise<void> | null = null
+  function ensureThemeInit(): Promise<void> {
+    if (!_themeInitPromise) {
+      _themeInitPromise = (async () => {
+        const savedMarpTheme = await GetMarpTheme()
+        if (savedMarpTheme) marpTheme = savedMarpTheme
+        customMarpThemes = await ListMarpCustomThemes()
+      })()
+    }
+    return _themeInitPromise
+  }
+
   async function renderMarpSlides(src: string): Promise<void> {
+    await ensureThemeInit()
     if (src !== _lastRawSrc) {
       _lastRawSrc = src
       const fm = src.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -266,10 +280,16 @@
     return { destroy: () => ro.disconnect() }
   }
 
-  let _marpStarted = false
-  $: if (_marpStarted) {
+  let _lastPath: string | undefined
+  $: scheduleRender(source, path)
+  function scheduleRender(src: string, p: string) {
     clearTimeout(_marpRenderTimer)
-    _marpRenderTimer = setTimeout(() => renderMarpSlides(source), 800)
+    if (p !== _lastPath) {
+      _lastPath = p
+      renderMarpSlides(src)
+    } else {
+      _marpRenderTimer = setTimeout(() => renderMarpSlides(src), 800)
+    }
   }
 
   function onMessage(e: MessageEvent) {
@@ -293,14 +313,9 @@
     }
   }
 
-  onMount(async () => {
+  onMount(() => {
     window.addEventListener('message', onMessage)
     window.addEventListener('keydown', onKeydown)
-    const savedMarpTheme = await GetMarpTheme()
-    if (savedMarpTheme) marpTheme = savedMarpTheme
-    customMarpThemes = await ListMarpCustomThemes()
-    await renderMarpSlides(source)
-    _marpStarted = true
   })
 
   onDestroy(() => {
