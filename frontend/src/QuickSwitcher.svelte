@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, createEventDispatcher } from 'svelte'
-  import { FileText, FilePlus, Code2, Pencil, FolderPlus } from 'lucide-svelte'
+  import { FileText, FilePlus, Code2 } from 'lucide-svelte'
   import type { PaletteItem } from './lib/types'
 
   export let notes: string[]
@@ -11,9 +11,6 @@
   let qsQuery = ''
   let qsIndex = 0
   let qsInputEl: HTMLInputElement
-  let qsMode: 'normal' | 'rename' | 'newFolder' = 'normal'
-  let qsSubValue = ''
-
   $: paletteItems = (() => {
     const q = qsQuery.trim()
     const ql = q.toLowerCase()
@@ -47,18 +44,7 @@
   async function onQsKeydown(e: KeyboardEvent): Promise<void> {
     if (e.key === 'Escape') {
       e.preventDefault()
-      if (qsMode !== 'normal') { qsMode = 'normal'; return }
       dispatch('close')
-    } else if (qsMode === 'rename') {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        dispatch('select', { kind: 'rename', value: qsSubValue.trim() })
-      }
-    } else if (qsMode === 'newFolder') {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        dispatch('select', { kind: 'newFolder', value: qsSubValue.trim() })
-      }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()
       qsIndex = Math.min(qsIndex + 1, qsTotal - 1)
@@ -75,56 +61,36 @@
 
 <div class="modal-overlay qs-overlay" on:click={() => dispatch('close')}>
   <div class="quick-switcher" on:click|stopPropagation>
-    {#if qsMode === 'rename'}
-      <div class="qs-mode-header"><Pencil size={13} /> リネーム</div>
-      <input
-        bind:this={qsInputEl}
-        bind:value={qsSubValue}
-        on:keydown={onQsKeydown}
-        class="qs-input"
-        placeholder="新しいノート名..."
-      />
-    {:else if qsMode === 'newFolder'}
-      <div class="qs-mode-header"><FolderPlus size={13} /> 新規フォルダ</div>
-      <input
-        bind:this={qsInputEl}
-        bind:value={qsSubValue}
-        on:keydown={onQsKeydown}
-        class="qs-input"
-        placeholder="フォルダ名..."
-      />
-    {:else}
-      <input
-        bind:this={qsInputEl}
-        bind:value={qsQuery}
-        on:keydown={onQsKeydown}
-        class="qs-input"
-        placeholder={qsQuery.startsWith('>') ? 'コマンドを検索...' : 'ノートを開く... (「>」でコマンド)'}
-      />
-      <ul class="qs-list">
-        {#if qsQuery.startsWith('>')}
-          <li class="qs-section">コマンド</li>
-        {:else if paletteItems.some(i => i.kind === 'note' || i.kind === 'create')}
-          <li class="qs-section">ノート</li>
-        {/if}
-        {#each paletteItems as item, i}
-          <li class:active={i === qsIndex} on:click={() => selectItem(item)}>
-            {#if item.kind === 'cmd'}
-              <Code2 size={13} />
-              <span class="qs-label">{item.label}</span>
-              {#if item.shortcut}<span class="qs-shortcut">{item.shortcut}</span>{/if}
-            {:else if item.kind === 'note'}
-              <FileText size={13} /><span class="qs-label">{item.path}</span>
-            {:else if item.kind === 'create'}
-              <FilePlus size={13} /><span class="qs-label">新規作成: "{item.path}"</span>
-            {/if}
-          </li>
-        {/each}
-        {#if paletteItems.length === 0}
-          <li class="qs-empty">一致する項目がありません</li>
-        {/if}
-      </ul>
-    {/if}
+    <input
+      bind:this={qsInputEl}
+      bind:value={qsQuery}
+      on:keydown={onQsKeydown}
+      class="qs-input"
+      placeholder={qsQuery.startsWith('>') ? 'コマンドを検索...' : 'ノートを開く... (「>」でコマンド)'}
+    />
+    <ul class="qs-list">
+      {#if qsQuery.startsWith('>')}
+        <li class="qs-section">コマンド</li>
+      {:else if paletteItems.some(i => i.kind === 'note' || i.kind === 'create')}
+        <li class="qs-section">ノート</li>
+      {/if}
+      {#each paletteItems as item, i}
+        <li class:active={i === qsIndex} on:click={() => selectItem(item)}>
+          {#if item.kind === 'cmd'}
+            <Code2 size={13} />
+            <span class="qs-label">{item.label}</span>
+            {#if item.shortcut}<span class="qs-shortcut">{item.shortcut}</span>{/if}
+          {:else if item.kind === 'note'}
+            <FileText size={13} /><span class="qs-label">{item.path}</span>
+          {:else if item.kind === 'create'}
+            <FilePlus size={13} /><span class="qs-label">新規作成: "{item.path}"</span>
+          {/if}
+        </li>
+      {/each}
+      {#if paletteItems.length === 0}
+        <li class="qs-empty">一致する項目がありません</li>
+      {/if}
+    </ul>
   </div>
 </div>
 
@@ -236,15 +202,5 @@
 
   .qs-section:first-child {
     border-top: none;
-  }
-
-  .qs-mode-header {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    padding: 0.5rem 0.8rem 0.2rem;
-    border-bottom: 1px solid var(--border);
   }
 </style>

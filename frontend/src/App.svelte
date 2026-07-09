@@ -57,11 +57,9 @@
     RenderMarkdown,
     ListNotes,
     ListFolders,
-    CreateFolder,
     ReadNote,
     SaveNote,
     CreateNote,
-    RenameNote,
     GetVaultPath,
     SelectVault,
     GetBacklinks,
@@ -219,7 +217,6 @@
 
   $: paletteCommands = [
     { label: '新規ノートを作成', shortcut: 'Ctrl+N', action: () => sidebarRef?.createNoteAt('') },
-    { label: '新規フォルダを作成', action: () => {} },
     { label: 'デイリーノートを開く', shortcut: 'Ctrl+D', action: openDailyNote },
     { label: `テーマを${theme === 'dark' ? 'ライト' : 'ダーク'}に切り替え`, action: toggleTheme },
     { label: `Vimモードを${vimMode ? '無効化' : '有効化'}`, action: toggleVim },
@@ -228,7 +225,6 @@
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
     { label: '設定を開く', action: async () => { showSettings = true; themeList = await ListThemes() } },
     ...(currentNote ? [
-      { label: `「${currentNote}」をリネーム`, action: () => {} },
       { label: `「${currentNote}」を削除`, action: () => { closeQuickSwitcher(); if (currentNote) sidebarRef?.deleteNote(currentNote) } },
       { label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } },
       { label: 'テーブルを整形', action: () => { if (editorView) formatCurrentTable(editorView) } },
@@ -263,33 +259,7 @@
   }
 
   async function onQsSelect(item: PaletteItem): Promise<void> {
-    if (item.kind === 'rename') {
-      const newName = item.value
-      if (newName && currentNote && newName !== currentNote) {
-        closeQuickSwitcher()
-        await RenameNote(currentNote, newName)
-        await refreshList()
-        await openTab(newName)
-      } else {
-        closeQuickSwitcher()
-      }
-    } else if (item.kind === 'newFolder') {
-      const name = item.value
-      if (name) {
-        closeQuickSwitcher()
-        try {
-          await CreateFolder(name)
-          await refreshList()
-          showToast(`フォルダ「${name}」を作成しました`)
-        } catch (err) {
-          showToast(`フォルダ作成失敗: ${err}`)
-        }
-      } else {
-        closeQuickSwitcher()
-      }
-    } else {
-      await executeItem(item)
-    }
+    await executeItem(item)
   }
 
   function toggleTheme(): void {
@@ -1101,7 +1071,6 @@
     {notes}
     {folders}
     {currentNote}
-    width={sidebarWidth}
     {compactMode}
     on:select={onSidebarSelect}
     on:refresh={onSidebarRefresh}

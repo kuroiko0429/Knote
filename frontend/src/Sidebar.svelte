@@ -19,7 +19,6 @@
   export let notes: string[] = []
   export let folders: string[] = []
   export let currentNote: string | null = null
-  export let width: number = 200
   export let compactMode = false
 
   type RefreshDetail =
@@ -634,11 +633,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .rename-input {
-    flex: 1;
-    min-width: 0;
   }
 
   .search-result {
