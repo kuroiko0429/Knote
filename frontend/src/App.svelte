@@ -17,6 +17,7 @@
   import Kanban from './Kanban.svelte'
   import MarpPreview, { detectMarp } from './MarpPreview.svelte'
   import SettingsPanel from './Settings.svelte'
+  import QuickSwitcher from './QuickSwitcher.svelte'
   import {
     FilePlus,
     FolderPlus,
@@ -220,11 +221,6 @@
     lastSelfSavedContent.set(currentNote!, source)
   }
   let showQuickSwitcher = false
-  let qsQuery = ''
-  let qsIndex = 0
-  let qsInputEl: HTMLInputElement
-  let qsMode: 'normal' | 'rename' | 'newFolder' = 'normal'
-  let qsSubValue = ''
 
   async function doExportHTML() {
     if (!currentNote) return
@@ -248,7 +244,7 @@
 
   $: paletteCommands = [
     { label: '新規ノートを作成', shortcut: 'Ctrl+N', action: () => createNoteAt('') },
-    { label: '新規フォルダを作成', action: () => { qsMode = 'newFolder'; qsSubValue = ''; tick().then(() => qsInputEl?.focus()) } },
+    { label: '新規フォルダを作成', action: () => {} },
     { label: 'デイリーノートを開く', shortcut: 'Ctrl+D', action: openDailyNote },
     { label: `テーマを${theme === 'dark' ? 'ライト' : 'ダーク'}に切り替え`, action: toggleTheme },
     { label: `Vimモードを${vimMode ? '無効化' : '有効化'}`, action: toggleVim },
@@ -257,7 +253,7 @@
     { label: 'グラフビューを表示', action: () => { showGraph = true } },
     { label: '設定を開く', action: async () => { showSettings = true; themeList = await ListThemes() } },
     ...(currentNote ? [
-      { label: `「${currentNote}」をリネーム`, action: () => { qsMode = 'rename'; qsSubValue = currentNote ?? ''; tick().then(() => qsInputEl?.focus()) } },
+      { label: `「${currentNote}」をリネーム`, action: () => {} },
       { label: `「${currentNote}」を削除`, action: () => { closeQuickSwitcher(); if (currentNote) deleteNote(currentNote) } },
       { label: `「${currentNote}」を閉じる`, action: () => { if (currentNote) closeTab(currentNote) } },
       { label: 'テーブルを整形', action: () => { if (editorView) formatCurrentTable(editorView) } },
@@ -266,40 +262,14 @@
     ] : []),
   ]
 
-  $: paletteItems = (() => {
-    const q = qsQuery.trim()
-    const ql = q.toLowerCase()
-    const items: PaletteItem[] = []
-    if (q.startsWith('>')) {
-      const cmdQ = ql.slice(1).trim()
-      for (const cmd of paletteCommands) {
-        if (!cmdQ || cmd.label.toLowerCase().includes(cmdQ)) {
-          items.push({ kind: 'cmd', label: cmd.label, shortcut: cmd.shortcut, action: cmd.action })
-        }
-      }
-    } else {
-      const noteResults = q ? notes.filter((n) => n.toLowerCase().includes(ql)) : notes.slice(0, 20)
-      for (const path of noteResults) items.push({ kind: 'note', path })
-      if (q && !notes.includes(q)) items.push({ kind: 'create', path: q })
-    }
-    return items
-  })()
-
-  $: qsTotal = paletteItems.length
-  $: if (qsIndex >= qsTotal) qsIndex = Math.max(0, qsTotal - 1)
+  $: paletteCommandItems = paletteCommands.map((cmd) => ({ kind: 'cmd' as const, label: cmd.label, shortcut: cmd.shortcut, action: cmd.action }))
 
   function openQuickSwitcher(): void {
     showQuickSwitcher = true
-    qsQuery = ''
-    qsIndex = 0
-    qsMode = 'normal'
-    qsSubValue = ''
-    tick().then(() => qsInputEl?.focus())
   }
 
   function closeQuickSwitcher(): void {
     showQuickSwitcher = false
-    qsMode = 'normal'
   }
 
   async function executeItem(item: PaletteItem): Promise<void> {
@@ -317,51 +287,33 @@
     }
   }
 
-  async function onQsKeydown(e: KeyboardEvent): Promise<void> {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      if (qsMode !== 'normal') { qsMode = 'normal'; return }
-      closeQuickSwitcher()
-    } else if (qsMode === 'rename') {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        const newName = qsSubValue.trim()
-        if (newName && currentNote && newName !== currentNote) {
-          closeQuickSwitcher()
-          await RenameNote(currentNote, newName)
+  async function onQsSelect(item: PaletteItem): Promise<void> {
+    if (item.kind === 'rename') {
+      const newName = item.value
+      if (newName && currentNote && newName !== currentNote) {
+        closeQuickSwitcher()
+        await RenameNote(currentNote, newName)
+        await refreshList()
+        await openTab(newName)
+      } else {
+        closeQuickSwitcher()
+      }
+    } else if (item.kind === 'newFolder') {
+      const name = item.value
+      if (name) {
+        closeQuickSwitcher()
+        try {
+          await CreateFolder(name)
           await refreshList()
-          await openTab(newName)
-        } else {
-          closeQuickSwitcher()
+          showToast(`フォルダ「${name}」を作成しました`)
+        } catch (err) {
+          showToast(`フォルダ作成失敗: ${err}`)
         }
+      } else {
+        closeQuickSwitcher()
       }
-    } else if (qsMode === 'newFolder') {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        const name = qsSubValue.trim()
-        if (name) {
-          closeQuickSwitcher()
-          try {
-            await CreateFolder(name)
-            await refreshList()
-            showToast(`フォルダ「${name}」を作成しました`)
-          } catch (err) {
-            showToast(`フォルダ作成失敗: ${err}`)
-          }
-        } else {
-          closeQuickSwitcher()
-        }
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      qsIndex = Math.min(qsIndex + 1, qsTotal - 1)
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      qsIndex = Math.max(qsIndex - 1, 0)
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const item = paletteItems[qsIndex]
-      if (item) executeItem(item)
+    } else {
+      await executeItem(item)
     }
   }
 
@@ -1681,60 +1633,12 @@
   {/if}
 
   {#if showQuickSwitcher}
-    <div class="modal-overlay qs-overlay" on:click={closeQuickSwitcher}>
-      <div class="quick-switcher" on:click|stopPropagation>
-        {#if qsMode === 'rename'}
-          <div class="qs-mode-header"><Pencil size={13} /> リネーム</div>
-          <input
-            bind:this={qsInputEl}
-            bind:value={qsSubValue}
-            on:keydown={onQsKeydown}
-            class="qs-input"
-            placeholder="新しいノート名..."
-          />
-        {:else if qsMode === 'newFolder'}
-          <div class="qs-mode-header"><FolderPlus size={13} /> 新規フォルダ</div>
-          <input
-            bind:this={qsInputEl}
-            bind:value={qsSubValue}
-            on:keydown={onQsKeydown}
-            class="qs-input"
-            placeholder="フォルダ名..."
-          />
-        {:else}
-          <input
-            bind:this={qsInputEl}
-            bind:value={qsQuery}
-            on:keydown={onQsKeydown}
-            class="qs-input"
-            placeholder={qsQuery.startsWith('>') ? 'コマンドを検索...' : 'ノートを開く... (「>」でコマンド)'}
-          />
-          <ul class="qs-list">
-            {#if qsQuery.startsWith('>')}
-              <li class="qs-section">コマンド</li>
-            {:else if paletteItems.some(i => i.kind === 'note' || i.kind === 'create')}
-              <li class="qs-section">ノート</li>
-            {/if}
-            {#each paletteItems as item, i}
-              <li class:active={i === qsIndex} on:click={() => executeItem(item)}>
-                {#if item.kind === 'cmd'}
-                  <Code2 size={13} />
-                  <span class="qs-label">{item.label}</span>
-                  {#if item.shortcut}<span class="qs-shortcut">{item.shortcut}</span>{/if}
-                {:else if item.kind === 'note'}
-                  <FileText size={13} /><span class="qs-label">{item.path}</span>
-                {:else}
-                  <FilePlus size={13} /><span class="qs-label">新規作成: "{item.path}"</span>
-                {/if}
-              </li>
-            {/each}
-            {#if paletteItems.length === 0}
-              <li class="qs-empty">一致する項目がありません</li>
-            {/if}
-          </ul>
-        {/if}
-      </div>
-    </div>
+    <QuickSwitcher
+      {notes}
+      commands={paletteCommandItems}
+      on:select={(e) => onQsSelect(e.detail)}
+      on:close={closeQuickSwitcher}
+    />
   {/if}
 
   {#if contextMenu}
@@ -3019,115 +2923,6 @@
     align-items: center;
     justify-content: center;
     z-index: 20;
-  }
-
-  .qs-overlay {
-    align-items: flex-start;
-    padding-top: 12vh;
-  }
-
-  .quick-switcher {
-    width: 560px;
-    max-width: 90vw;
-    max-height: 60vh;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .qs-input {
-    border: none;
-    border-bottom: 1px solid var(--border);
-    background: none;
-    color: var(--text);
-    padding: 0.8rem 1rem;
-    font-size: 1rem;
-  }
-
-  .qs-input:focus {
-    outline: none;
-  }
-
-  .qs-list {
-    list-style: none;
-    margin: 0;
-    padding: 0.3rem;
-    overflow-y: auto;
-  }
-
-  .qs-list li {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 0.5rem;
-    padding: 0.5rem 0.6rem;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  .qs-list li.active {
-    background: var(--accent-hover);
-  }
-
-  .qs-list li:hover {
-    background: var(--bg-hover);
-  }
-
-  .qs-list li.active:hover {
-    background: var(--accent-hover);
-  }
-
-  .qs-empty {
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    justify-content: center;
-    cursor: default;
-  }
-
-  .qs-label {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .qs-shortcut {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0.05rem 0.3rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .qs-section {
-    font-size: 0.7rem;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 0.4rem 0.6rem 0.2rem;
-    cursor: default;
-    border-top: 1px solid var(--border);
-  }
-
-  .qs-section:first-child {
-    border-top: none;
-  }
-
-  .qs-mode-header {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    padding: 0.5rem 0.8rem 0.2rem;
-    border-bottom: 1px solid var(--border);
   }
 
   .bottombar-right {
