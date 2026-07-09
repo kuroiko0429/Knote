@@ -202,7 +202,7 @@ func (a *App) ListThemes() []string {
 	if err != nil {
 		return []string{}
 	}
-	var names []string
+	names := []string{}
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".css") {
 			names = append(names, strings.TrimSuffix(e.Name(), ".css"))

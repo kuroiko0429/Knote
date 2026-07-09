@@ -215,7 +215,7 @@ func (a *App) QueryNotes(query string) DataviewResult {
 
 	// --- parse query ---
 	mode := "list"
-	var columns []string
+	columns := []string{}
 	var fromTags []string
 	var fromPaths []string
 	var conditions []string
@@ -269,7 +269,7 @@ func (a *App) QueryNotes(query string) DataviewResult {
 	}
 
 	// --- walk vault ---
-	var rows []map[string]string
+	rows := []map[string]string{}
 
 	_ = filepath.WalkDir(a.vaultPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
@@ -470,7 +470,7 @@ func (a *App) SearchWithSnippets(query string) []SearchHit {
 		return []SearchHit{}
 	}
 	ql := strings.ToLower(query)
-	var hits []SearchHit
+	hits := []SearchHit{}
 	_ = a.walkNotes(func(relPath string) error {
 		data, err := os.ReadFile(filepath.Join(a.vaultPath, relPath+".md"))
 		if err != nil {

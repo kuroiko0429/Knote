@@ -30,6 +30,9 @@ func (a *App) GetSnippets() ([]Snippet, error) {
 	if err := json.Unmarshal(data, &snippets); err != nil {
 		return nil, err
 	}
+	if snippets == nil {
+		snippets = []Snippet{}
+	}
 	return snippets, nil
 }
 
