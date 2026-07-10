@@ -59,7 +59,7 @@ export async function applyMermaid(root: HTMLElement, theme: 'dark' | 'light'): 
   }
 }
 
-export function dvEscape(s: string): string {
+function dvEscape(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

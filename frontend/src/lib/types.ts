@@ -12,3 +12,9 @@ export interface OutlineItem {
   text: string
   el: HTMLElement
 }
+
+export type SidebarRefreshDetail =
+  | { kind: 'pathChange'; type: 'note' | 'folder'; oldPath: string; newPath: string }
+  | { kind: 'moveModal'; oldPath: string; newPath: string }
+  | { kind: 'delete'; path: string }
+  | undefined

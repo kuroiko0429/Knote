@@ -13,7 +13,6 @@ import (
 	"strings"
 )
 
-// imageWikilinkPattern is used by RenderMarkdown to detect ![[image]] embeds
 var imageWikilinkPattern = regexp.MustCompile(`!\[\[([^\]\[]+)\]\]`)
 
 // RenderMarkdown converts markdown source to HTML. [[note]] wikilinks are

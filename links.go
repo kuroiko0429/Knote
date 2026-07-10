@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// wikilinkPattern also used by RenderMarkdown (export.go)
 var wikilinkPattern = regexp.MustCompile(`\[\[([^\]\[]+)\]\]`)
 
 // GetBacklinks returns the paths of notes that contain a [[wikilink]] to the given note

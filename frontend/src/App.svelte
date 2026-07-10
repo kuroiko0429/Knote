@@ -88,9 +88,10 @@
     GetPreviewFontSize,
     GetSnippets,
   } from '../wailsjs/go/main/App.js'
-  import type { BacklinkItem, SnippetDef, PaletteItem, OutlineItem } from './lib/types'
+  import type { BacklinkItem, SnippetDef, PaletteItem, OutlineItem, SidebarRefreshDetail } from './lib/types'
   import { toast, showToast, fontFamily, fontSize, previewFontFamily, previewFontSize } from './lib/stores'
   import { applyCheckboxes, applyMath, applyMermaid, applyDataview, applyCodeBlockButtons } from './lib/markdown'
+  import { basename, dirname } from './lib/path'
   import {
     relativeLineNumbers,
     livePreviewStyle,
@@ -258,10 +259,6 @@
     }
   }
 
-  async function onQsSelect(item: PaletteItem): Promise<void> {
-    await executeItem(item)
-  }
-
   function toggleTheme(): void {
     theme = theme === 'dark' ? 'light' : 'dark'
     localStorage.setItem('knote-theme', theme)
@@ -331,16 +328,6 @@
     if (dragging === 'terminal') localStorage.setItem('knote-terminal-h', String(terminalHeight))
     dragging = null
     document.body.style.userSelect = ''
-  }
-
-  function basename(path: string): string {
-    const i = path.lastIndexOf('/')
-    return i === -1 ? path : path.slice(i + 1)
-  }
-
-  function dirname(path: string): string {
-    const i = path.lastIndexOf('/')
-    return i === -1 ? '' : path.slice(0, i)
   }
 
   $: breadcrumb = currentNote ? currentNote.split('/').join(' / ') : ''
@@ -870,12 +857,6 @@
     await openTab(e.detail)
   }
 
-  type SidebarRefreshDetail =
-    | { kind: 'pathChange'; type: 'note' | 'folder'; oldPath: string; newPath: string }
-    | { kind: 'moveModal'; oldPath: string; newPath: string }
-    | { kind: 'delete'; path: string }
-    | undefined
-
   async function onSidebarRefresh(e: CustomEvent<SidebarRefreshDetail>): Promise<void> {
     const detail = e.detail
     if (detail?.kind === 'delete') {
@@ -1074,7 +1055,6 @@
     {compactMode}
     on:select={onSidebarSelect}
     on:refresh={onSidebarRefresh}
-    on:tagSelect={() => {}}
   />
 
   {#if showSidebar}
@@ -1263,7 +1243,7 @@
     <QuickSwitcher
       {notes}
       commands={paletteCommandItems}
-      on:select={(e) => onQsSelect(e.detail)}
+      on:select={(e) => executeItem(e.detail)}
       on:close={closeQuickSwitcher}
     />
   {/if}

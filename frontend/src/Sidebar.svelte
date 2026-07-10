@@ -15,22 +15,17 @@
     GetTagCounts,
   } from '../wailsjs/go/main/App.js'
   import { fuzzyScore, fuzzyHighlight, highlightQuery } from './lib/fuzzy'
+  import { basename, dirname } from './lib/path'
+  import type { SidebarRefreshDetail } from './lib/types'
 
   export let notes: string[] = []
   export let folders: string[] = []
   export let currentNote: string | null = null
   export let compactMode = false
 
-  type RefreshDetail =
-    | { kind: 'pathChange'; type: 'note' | 'folder'; oldPath: string; newPath: string }
-    | { kind: 'moveModal'; oldPath: string; newPath: string }
-    | { kind: 'delete'; path: string }
-    | undefined
-
   const dispatch = createEventDispatcher<{
     select: string
-    refresh: RefreshDetail
-    tagSelect: string
+    refresh: SidebarRefreshDetail
   }>()
 
   let renamingPath: string | null = null
@@ -55,16 +50,6 @@
   let activeTag: string | null = null
   let tagCounts: { tag: string; count: number }[] = []
   let showTagPanel = false
-
-  function basename(path: string): string {
-    const i = path.lastIndexOf('/')
-    return i === -1 ? path : path.slice(i + 1)
-  }
-
-  function dirname(path: string): string {
-    const i = path.lastIndexOf('/')
-    return i === -1 ? '' : path.slice(0, i)
-  }
 
   function buildTree(folderPaths: string[], notePaths: string[]): TreeNode[] {
     const folderMap = new Map<string, TreeNode & { type: 'folder' }>()
@@ -178,7 +163,6 @@
       searchQuery = ''
     }
     await runSearch()
-    dispatch('tagSelect', tag)
   }
 
   export function resetFilters(): void {
@@ -698,16 +682,6 @@
     color: inherit;
     border-radius: 2px;
     padding: 0 1px;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 20;
   }
 
   .move-modal {

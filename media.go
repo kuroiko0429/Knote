@@ -12,7 +12,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// isImageExt also used by onFileDrop (watcher.go)
 func isImageExt(ext string) bool {
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg":
